@@ -120,6 +120,7 @@ class GameState:
                 "driveThrough": lap["drive_through"] > 0,
                 "statusLabel": status_label,        # "DNF"/"DSQ"/"DNS"/"NC" or None
                 "retired": status_label is not None,  # greys out the row
+                "finished": lap["result_status"] == fp.RESULT_FINISHED,
                 "tyre": tyre_label,
                 "tyreColour": tyre_colour,
                 "tyreAge": stat.get("tyre_age_laps", 0),
@@ -131,6 +132,7 @@ class GameState:
         rows.sort(key=lambda r: r["position"])
         return {
             "session": {
+                "brandMark": config.BRAND_MARK,
                 "track": self.session.get("track_name", "—"),
                 "type": self.session.get("session_type_name", "—"),
                 "totalLaps": self.session.get("total_laps", 0),

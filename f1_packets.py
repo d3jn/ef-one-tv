@@ -78,20 +78,28 @@ TYRES = {
 }
 DEFAULT_TYRE = ("?", "#666666")
 
-# track id → display name (subset; unknown ids fall back to "Track <id>").
+# track id → display name (unknown ids fall back to "Track <id>"). Ids verified
+# against the sibling F1 25 parsers; 33 (Madrid) is provisional.
 TRACKS = {
-    0: "Melbourne", 2: "Shanghai", 3: "Bahrain", 4: "Catalunya", 5: "Monaco",
-    6: "Montreal", 7: "Silverstone", 9: "Hungaroring", 10: "Spa", 11: "Monza",
-    12: "Singapore", 13: "Suzuka", 14: "Abu Dhabi", 15: "COTA", 16: "Interlagos",
-    17: "Red Bull Ring", 19: "Mexico", 20: "Baku", 26: "Zandvoort", 27: "Imola",
+    0: "Melbourne", 1: "Paul Ricard", 2: "Shanghai", 3: "Bahrain",
+    4: "Catalunya", 5: "Monaco", 6: "Montreal", 7: "Silverstone",
+    8: "Hockenheim", 9: "Hungaroring", 10: "Spa", 11: "Monza",
+    12: "Singapore", 13: "Suzuka", 14: "Abu Dhabi", 15: "COTA",
+    16: "Interlagos", 17: "Red Bull Ring", 18: "Sochi", 19: "Mexico",
+    20: "Baku", 21: "Sakhir Short", 22: "Silverstone Short", 23: "COTA Short",
+    24: "Suzuka Short", 25: "Hanoi", 26: "Zandvoort", 27: "Imola",
     28: "Portimao", 29: "Jeddah", 30: "Miami", 31: "Las Vegas", 32: "Losail",
     33: "Madrid",
 }
 
+# F1 25 session-type ids (per the appendix). Note this differs from the pre-2023
+# layout: Sprint-shootout/qualifying sits at 10-14 and Race moved to 15-17, with
+# Time Trial at 18. Verified against the sibling F1 25 parsers.
 SESSION_TYPES = {
     0: "Unknown", 1: "P1", 2: "P2", 3: "P3", 4: "Short Practice",
     5: "Q1", 6: "Q2", 7: "Q3", 8: "Short Quali", 9: "One-Shot Quali",
-    10: "Race", 11: "Race 2", 12: "Race 3", 13: "Time Trial",
+    10: "SQ1", 11: "SQ2", 12: "SQ3", 13: "Short SQ", 14: "One-Shot SQ",
+    15: "Race", 16: "Race 2", 17: "Race 3", 18: "Time Trial",
 }
 
 # LapData.m_resultStatus → broadcast label for cars out of the race. Per the
@@ -105,6 +113,8 @@ RESULT_LABELS = {
     6: "NC",    # not classified
     7: "DNF",   # retired
 }
+
+RESULT_FINISHED = 3  # m_resultStatus: completed the race (gets a finish flag)
 
 
 def result_label(result_status):
@@ -138,10 +148,11 @@ def session_type_name(session_type):
     return SESSION_TYPES.get(session_type, f"Session {session_type}")
 
 
-# Which header info to show per session type: races show a lap counter, quali
-# sessions a countdown, everything else (practice, time trial…) shows nothing.
-RACE_SESSIONS = {10, 11, 12}
-QUALI_SESSIONS = {5, 6, 7, 8, 9}
+# Which header info to show per session type: races show a lap counter; the
+# timed knock-out sessions (normal qualifying 5-9 and sprint qualifying 10-14)
+# show a countdown; everything else (practice, time trial…) shows nothing.
+RACE_SESSIONS = {15, 16, 17}
+QUALI_SESSIONS = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
 
 
 def session_info_kind(session_type):

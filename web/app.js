@@ -134,23 +134,31 @@ function updateRow(row, car, rank, total) {
   refs.drs.classList.toggle("on", car.drs);
 
   renderRightColumn(refs, car, rank);
-  renderPenalty(refs, car);
+  renderStatusBlock(refs, car);
 }
 
-// Penalty board: a black tab that pokes out to the right of the row, shown only
-// when a driver has an unserved time penalty and/or drive-through. Suppressed
-// for out-of-race drivers (their penalties no longer matter).
-function renderPenalty(refs, car) {
-  const parts = [];
-  if (!car.retired) {
-    if (car.penaltySec > 0) parts.push(`<span class="pen-time">+${car.penaltySec}</span>`);
-    if (car.driveThrough) parts.push(`<span class="pen-tag">DT</span>`);
+// The black tab that pokes out past the row's right edge. One shared, animated
+// container shows either the finish flag (when a driver has finished — this
+// takes priority) or unserved penalties ("+3", DT). Empty otherwise, so it
+// slides away. Suppressed for out-of-race drivers.
+function renderStatusBlock(refs, car) {
+  const el = refs.penalty;
+  let html = "";
+  if (car.finished) {
+    // Finish flag wins even if penalties remain unresolved.
+    html = `<img class="finish-flag" src="other/finish.png" alt="finished" />`;
+  } else if (!car.retired) {
+    if (car.penaltySec > 0) html += `<span class="pen-time">+${car.penaltySec}</span>`;
+    if (car.driveThrough) html += `<span class="pen-tag">DT</span>`;
   }
-  const want = parts.length > 0;
-  // Only rewrite content when showing — keep the last content while it slides
-  // out so the board doesn't blank mid-animation.
-  if (want) refs.penalty.innerHTML = parts.join("");
-  refs.penalty.classList.toggle("show", want);
+  const want = html !== "";
+  // Only rewrite when the content actually changes: keeps the last content
+  // during the slide-out, and avoids re-fetching the flag <img> every frame.
+  if (want && el.dataset.html !== html) {
+    el.innerHTML = html;
+    el.dataset.html = html;
+  }
+  el.classList.toggle("show", want);
 }
 
 // The right-most column: a metric (mode-dependent) followed by the tyre
@@ -197,6 +205,7 @@ function renderRightColumn(refs, car, rank) {
 // Header: track / session type, plus session info — a lap counter in races,
 // a mm:ss countdown in qualifying, hidden for other session types.
 function renderHeader(s) {
+  if (s.brandMark != null) document.getElementById("brand-mark").textContent = s.brandMark;
   document.getElementById("track").textContent = s.track;
   document.getElementById("session-type").textContent = s.type;
 

@@ -10,6 +10,7 @@ Keys:
     http_host  interface the graphics page binds to     (default 127.0.0.1)
     http_port  port the graphics page is served on       (default 5000)
     push_hz    snapshots/sec pushed to the browser       (default 20)
+    brand_mark text shown in the red header badge         (default "F1")
     driver_name_overrides  list of {source_name, source_number, target_name}
                objects used to swap displayed driver names (default [])
 """
@@ -23,6 +24,7 @@ DEFAULTS = {
     "http_host": "127.0.0.1",
     "http_port": 5000,
     "push_hz": 20,
+    "brand_mark": "F1",
     "driver_name_overrides": [],
 }
 
@@ -54,6 +56,7 @@ UDP_PORT = int(_settings["udp_port"])
 HTTP_HOST = str(_settings["http_host"])
 HTTP_PORT = int(_settings["http_port"])
 PUSH_HZ = int(_settings["push_hz"])
+BRAND_MARK = str(_settings["brand_mark"])
 DRIVER_NAME_OVERRIDES = _settings["driver_name_overrides"] or []
 
 

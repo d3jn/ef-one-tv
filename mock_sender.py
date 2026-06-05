@@ -22,6 +22,10 @@ NUM_ACTIVE = 20
 # 1=inactive(DNS), 5=disqualified(DSQ), 4=didnotfinish(DNF), 7=retired(DNF).
 OUT_STATES = {16: 1, 17: 5, 18: 4, 19: 7}
 
+# Car indices that have finished the race (resultStatus 3 -> finish flag). Car 4
+# also carries penalties, to show the flag takes priority over the penalty board.
+FINISHED = {4, 5, 6}
+
 # Car index → (time-penalty seconds, unserved drive-through count), to demo the
 # penalty board: "+5", "DT", "+3 DT", "+13".
 PENALTIES = {2: (5, 0), 3: (0, 1), 4: (3, 1), 9: (13, 0)}
@@ -79,11 +83,11 @@ def participants_packet(frame):
 
 
 def session_packet(frame):
-    # weather, trackTemp, airTemp, totalLaps, trackLength, sessionType=10(Race),
+    # weather, trackTemp, airTemp, totalLaps, trackLength, sessionType=15(Race),
     # trackId=10(Spa), then enough trailing fields to satisfy SESSION_PRE_FMT.
     body = struct.pack(
         fp.SESSION_PRE_FMT,
-        1, 30, 24, 44, 7004, 10, 10, 0, 3600, 3600, 80, 0, 0, 0, 0, 0,
+        1, 30, 24, 44, 7004, 15, 10, 0, 3600, 3600, 80, 0, 0, 0, 0, 0,
     )
     return header(fp.PACKET_SESSION, frame) + body
 
@@ -103,7 +107,7 @@ def lap_packet(frame, t):
             pit = 1 if (i == 7 and int(t) % 40 < 4) else 0
             # A few cars out of the race, to exercise the status labels:
             # resultStatus 1=inactive(DNS), 4=DNF, 5=DSQ, 7=retired(DNF).
-            result = OUT_STATES.get(i, 2)
+            result = 3 if i in FINISHED else OUT_STATES.get(i, 2)
             pen_sec, drive_through = PENALTIES.get(i, (0, 0))
         else:
             position = 0

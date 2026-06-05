@@ -233,6 +233,8 @@ html, body {
               opacity 0.22s ease;
 }
 .penalty.show { transform: translate(0, -50%); opacity: 1; }
+/* Finish flag fills the block height, keeping its portrait aspect ratio. */
+.finish-flag { height: 20px; width: auto; display: block; }
 .pen-time { letter-spacing: 0.5px; }
 /* DT tag: white-on-black inverted so it reads as a distinct chip. */
 .pen-tag {
