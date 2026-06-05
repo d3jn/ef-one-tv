@@ -10,6 +10,8 @@ Keys:
     http_host  interface the graphics page binds to     (default 127.0.0.1)
     http_port  port the graphics page is served on       (default 5000)
     push_hz    snapshots/sec pushed to the browser       (default 20)
+    driver_name_overrides  list of {source_name, source_number, target_name}
+               objects used to swap displayed driver names (default [])
 """
 
 import json
@@ -21,6 +23,7 @@ DEFAULTS = {
     "http_host": "127.0.0.1",
     "http_port": 5000,
     "push_hz": 20,
+    "driver_name_overrides": [],
 }
 
 
@@ -51,3 +54,24 @@ UDP_PORT = int(_settings["udp_port"])
 HTTP_HOST = str(_settings["http_host"])
 HTTP_PORT = int(_settings["http_port"])
 PUSH_HZ = int(_settings["push_hz"])
+DRIVER_NAME_OVERRIDES = _settings["driver_name_overrides"] or []
+
+
+def resolve_driver_name(name, number):
+    """Map a telemetry driver to an override target name, or None if no rule
+    applies. Match priority (per project decision): first by source_name, then
+    by source_number; otherwise the caller falls back to the telemetry name.
+    Name matching is case-insensitive and whitespace-trimmed."""
+    name_key = (name or "").strip().casefold()
+    # Tier 1: match by source name.
+    if name_key:
+        for o in DRIVER_NAME_OVERRIDES:
+            src = str(o.get("source_name", "")).strip().casefold()
+            if src and src == name_key:
+                return o.get("target_name")
+    # Tier 2: match by source number.
+    if number is not None:
+        for o in DRIVER_NAME_OVERRIDES:
+            if o.get("source_number") == number:
+                return o.get("target_name")
+    return None

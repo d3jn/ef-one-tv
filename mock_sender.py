@@ -26,6 +26,15 @@ OUT_STATES = {16: 1, 17: 5, 18: 4, 19: 7}
 # penalty board: "+5", "DT", "+3 DT", "+13".
 PENALTIES = {2: (5, 0), 3: (0, 1), 4: (3, 1), 9: (13, 0)}
 
+# Car index → (online handle, race number) for human (multiplayer) players.
+# Everyone else is an AI bot. Single-name handles (no first/last) on purpose,
+# to exercise the multiplayer name handling and the name-swap overrides.
+HUMANS = {
+    0: ("Cool Racer 7", 99),   # no override -> shown whole as "COOL RACER 7"
+    1: ("lando_gamer", 4),     # override by source_name -> "LANDO"
+    2: ("ScuderiaFan", 16),    # override by source_number 16 -> "CHARLES"
+}
+
 DRIVERS = [
     ("M VERSTAPPEN", 1, 2), ("L NORRIS", 4, 8), ("C LECLERC", 16, 1),
     ("O PIASTRI", 81, 8), ("C SAINZ", 55, 3), ("G RUSSELL", 63, 0),
@@ -52,9 +61,14 @@ def participants_packet(frame):
             name, number, team = DRIVERS[i]
         else:
             name, number, team = "", 0, 0
+        if i in HUMANS:                          # human player overrides the bot
+            name, number = HUMANS[i]
+            ai = 0
+        else:
+            ai = 1
         body += struct.pack(
             fp.PARTICIPANT_DATA_FMT,
-            1, 255, 0, team, 0, number, 0,       # ai..nationality
+            ai, 255, 0, team, 0, number, 0,      # ai..nationality
             name.encode("utf-8")[:31],            # 32s name (null-padded by pack)
             1, 1,                                 # yourTelemetry, showOnlineNames
             0,                                    # techLevel

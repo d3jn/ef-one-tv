@@ -225,6 +225,7 @@ def parse_participants(data):
         p = struct.unpack_from(PARTICIPANT_DATA_FMT, data, offset)
         name = p[7].split(b"\x00", 1)[0].decode("utf-8", errors="replace").strip()
         out.append({
+            "ai_controlled": p[0],   # 1 = AI bot, 0 = human (multiplayer) player
             "team_id": p[3],
             "race_number": p[5],
             "name": name,

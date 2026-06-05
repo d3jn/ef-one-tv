@@ -5,6 +5,7 @@ participants once or twice a second). We keep the latest of each per car and
 build a single sorted "broadcast view" on demand for the web client.
 """
 
+import config
 import f1_packets as fp
 
 
@@ -88,7 +89,17 @@ class GameState:
             team_logo = fp.team_logo(team_id)
             tyre_label, tyre_colour = fp.tyre_info(stat.get("visual_tyre"))
             name = part.get("name") or ""
-            code = _driver_surname(name, part.get("race_number"))
+            number = part.get("race_number")
+            is_human = part.get("ai_controlled", 1) == 0
+            # Human (multiplayer) players carry a single online handle, so the
+            # name-swap system and the "show the whole name" rule apply to them.
+            # AI bots keep their real driver name reduced to a surname.
+            if is_human:
+                override = config.resolve_driver_name(name, number)
+                code = override or _player_name(name, number)
+                name = override or code
+            else:
+                code = _driver_surname(name, number)
             status_label = fp.result_label(lap["result_status"])  # None if racing
 
             rows.append({
@@ -132,10 +143,22 @@ class GameState:
 
 
 def _driver_surname(name, race_number):
-    """Full last name in caps from the driver name (fallback: car number)."""
+    """Full last name in caps from an AI driver name (fallback: car number)."""
     parts = [p for p in name.replace("_", " ").split() if p]
     if parts:
         return parts[-1].upper()
     if race_number:
         return f"#{race_number}"
     return "—"
+
+
+def _player_name(name, race_number):
+    """A human player's online handle, shown whole (it is a single name, not
+    first/last) and upper-cased for the broadcast look. Falls back to the car
+    number when the name is hidden/empty (e.g. online names turned off)."""
+    name = (name or "").strip()
+    if name:
+        return name.upper()
+    if race_number:
+        return f"#{race_number}"
+    return "PLAYER"
