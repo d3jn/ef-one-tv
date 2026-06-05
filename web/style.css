@@ -1,0 +1,188 @@
+/* ef-one-tv broadcast graphics.
+   Everything lives on a fixed 1920×1080 #stage that is scaled to fit the
+   window, so the layout is resolution-independent and OBS-ready. */
+
+:root {
+  --bg: #0a0e14;
+  --panel: rgba(12, 16, 24, 0.86);
+  --panel-row: rgba(20, 26, 38, 0.82);
+  --panel-row-alt: rgba(28, 36, 52, 0.82);
+  --ink: #f4f7fb;
+  --ink-dim: #9fb0c3;
+  --accent: #e10600;
+  --row-h: 40px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--ink);
+}
+
+/* --- Stage (transparent so it can overlay gameplay in OBS) --- */
+#stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1920px;
+  height: 1080px;
+  transform: translate(-50%, -50%) scale(var(--scale, 1));
+  transform-origin: center center;
+}
+
+/* --- Top bar --- */
+/* Header sits directly above the tower; same width, separated by a gap as
+   thick as the blocks' border-radius. */
+#panel {
+  position: absolute;
+  top: 36px;
+  left: 48px;
+  width: 430px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px; /* == border-radius of the blocks */
+}
+
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  height: 52px;
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.f1-mark {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: 1px;
+  padding: 4px 11px;
+  border-radius: 5px;
+}
+
+.session-meta { font-size: 17px; color: var(--ink-dim); letter-spacing: 1px; }
+.session-meta .sep { margin: 0 9px; opacity: 0.4; }
+#track { color: var(--ink); font-weight: 600; }
+
+/* Session info (lap counter / quali countdown), pushed to the right. */
+#session-info {
+  margin-left: auto;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--ink-dim);
+}
+#session-info.hidden { display: none; }
+#session-info .n { color: var(--ink); }
+
+/* --- Timing tower --- */
+#tower {
+  position: relative; /* anchors the absolutely-positioned rows */
+  width: 100%;
+  background: var(--panel);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+#tower-rows { list-style: none; }
+
+/* Each row. position:absolute + a translateY transition is what gives the
+   smooth "TV" reorder when cars swap places (see app.js layoutRows). */
+.row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--row-h);
+  display: grid;
+  grid-template-columns: 46px 1fr 96px;
+  align-items: center;
+  padding: 0 12px 0 0;
+  background: var(--panel-row);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.35s ease;
+  will-change: transform;
+}
+.row:nth-child(even) { background: var(--panel-row-alt); }
+.row.player { background: rgba(225, 6, 0, 0.18); }
+/* Drivers out of the race (DNF/DSQ/DNS/NC) — greyed out in the standings. */
+.row.retired { opacity: 0.45; filter: grayscale(1); }
+.row.entering { opacity: 0; }
+
+/* Position cell with team-colour accent bar */
+.pos {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 18px;
+  font-weight: 800;
+}
+.pos::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--team, #888);
+}
+
+.driver { display: flex; align-items: center; gap: 9px; padding-left: 10px; min-width: 0; }
+.code { font-size: 17px; font-weight: 800; letter-spacing: 0.5px; }
+
+/* DRS pill */
+.drs {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--ink-dim);
+  flex: 0 0 auto;
+}
+.drs.on {
+  color: #001b0a;
+  background: #00e676;
+  border-color: #00e676;
+  box-shadow: 0 0 10px rgba(0, 230, 118, 0.6);
+}
+
+.gap {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Value column: the metric, then the persistent tyre letter on the far right. */
+.gap .val { display: inline-flex; align-items: center; justify-content: flex-end; gap: 9px; }
+/* Only the metric slides/fades on mode change (see switchMode). */
+.val-main { will-change: transform, opacity; }
+/* Tyre compound: bold, colour-coded letter (colour set inline per compound).
+   Collapses when empty (PIT / out-of-race) so the label sits flush right. */
+.tyre-letter { font-weight: 800; min-width: 13px; text-align: center; }
+.tyre-letter:empty { display: none; }
+.gap.leader .val-main { color: var(--accent); font-weight: 800; }
+.gap .pit {
+  color: #ffd12e;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+/* DNF/DSQ/DNS/NC label (row is already greyed; keep the text bold). */
+.status-out { font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); }
+

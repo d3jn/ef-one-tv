@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ef-one-tv</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- Design surface is a fixed 1920×1080 so it drops straight into OBS as a
+       browser source over gameplay capture. -->
+  <div id="stage">
+    <!-- Header sits directly above the tower, same width, small gap between. -->
+    <div id="panel">
+      <header id="topbar">
+        <span class="f1-mark">F1</span>
+        <div class="session-meta">
+          <span id="track">—</span>
+          <span class="sep">/</span>
+          <span id="session-type">—</span>
+        </div>
+        <div id="session-info"></div>
+      </header>
+
+      <section id="tower">
+        <ol id="tower-rows"></ol>
+      </section>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

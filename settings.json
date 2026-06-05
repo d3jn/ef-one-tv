@@ -1,0 +1,6 @@
+{
+  "udp_port": 20777,
+  "http_host": "127.0.0.1",
+  "http_port": 5000,
+  "push_hz": 20
+}

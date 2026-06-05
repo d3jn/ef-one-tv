@@ -1,0 +1,115 @@
+"""ef-one-tv server: reads F1 25 UDP telemetry and serves broadcast graphics.
+
+One asyncio loop does three jobs:
+  1. Listens for F1 25 UDP packets on UDP_PORT and folds them into GameState.
+  2. Serves the static web/ page on http://localhost:HTTP_PORT.
+  3. Pushes the latest broadcast snapshot to every connected browser over a
+     WebSocket at PUSH_HZ — decoupled from the (much faster) packet rate so we
+     never flood the client.
+
+Run:  python server.py
+"""
+
+import asyncio
+import contextlib
+import json
+import socket
+from pathlib import Path
+
+import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+import config
+from state import GameState
+
+# All configurable from settings.json (see config.py).
+UDP_PORT = config.UDP_PORT      # F1 25 telemetry port to listen on
+HTTP_HOST = config.HTTP_HOST    # interface the page binds to
+HTTP_PORT = config.HTTP_PORT    # http://localhost:<HTTP_PORT>
+PUSH_HZ = config.PUSH_HZ        # snapshots/sec pushed to the browser
+
+WEB_DIR = Path(__file__).parent / "web"
+
+game = GameState()
+clients: set[WebSocket] = set()
+
+
+class TelemetryProtocol(asyncio.DatagramProtocol):
+    """Folds each inbound UDP datagram into the shared GameState."""
+
+    def datagram_received(self, data, addr):
+        game.update(data)
+
+    def error_received(self, exc):
+        # Stray ICMP "port unreachable" etc. — never fatal for a UDP listener.
+        pass
+
+
+async def broadcaster():
+    """Push the latest snapshot to all clients at a fixed cadence."""
+    interval = 1 / PUSH_HZ
+    while True:
+        await asyncio.sleep(interval)
+        if not clients:
+            continue
+        payload = json.dumps(game.snapshot())
+        for ws in list(clients):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                clients.discard(ws)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    loop = asyncio.get_running_loop()
+    # SO_REUSEADDR + a generous receive buffer so we don't drop packets.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    with contextlib.suppress(OSError):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+    sock.bind(("0.0.0.0", UDP_PORT))
+    transport, _ = await loop.create_datagram_endpoint(
+        TelemetryProtocol, sock=sock
+    )
+    task = asyncio.create_task(broadcaster())
+    print(f"Listening for F1 25 telemetry on UDP {UDP_PORT}")
+    print(f"Open the graphics at http://{HTTP_HOST}:{HTTP_PORT}")
+    try:
+        yield
+    finally:
+        task.cancel()
+        transport.close()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket):
+    await ws.accept()
+    clients.add(ws)
+    # Send an immediate snapshot so a fresh client isn't blank for up to 1 tick.
+    with contextlib.suppress(Exception):
+        await ws.send_text(json.dumps(game.snapshot()))
+    try:
+        while True:
+            await ws.receive_text()  # we don't expect inbound messages; keepalive
+    except WebSocketDisconnect:
+        pass
+    finally:
+        clients.discard(ws)
+
+
+@app.get("/")
+async def index():
+    return FileResponse(WEB_DIR / "index.html")
+
+
+app.mount("/", StaticFiles(directory=WEB_DIR), name="static")
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host=HTTP_HOST, port=HTTP_PORT, log_level="warning")
