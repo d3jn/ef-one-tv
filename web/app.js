@@ -11,14 +11,38 @@ const rowsEl = document.getElementById("tower-rows");
 const rows = new Map(); // carIndex -> { el, refs }
 
 /* --- Right-column modes ---
- * The right column shows different info depending on the active mode. Switch
- * with number keys 1/2/3, or cycle with "m". */
-const MODES = ["gap", "interval", "tyre"];
-let modeIndex = 0;
-let lastState = null; // re-rendered on mode change so the new values appear at once
+ * The right column can show several metrics, but which ones are available
+ * depends on the session: a race offers all of them, other sessions just "gap".
+ *
+ * To change what a session type offers, edit MODE_POOLS: each key is a session
+ * kind (as sent in session.infoKind) mapping to the ordered list of modes for
+ * that kind; anything not listed falls back to DEFAULT_POOL. Add a new mode by
+ * (1) listing it here and (2) handling it in renderRightColumn. Switch between
+ * the active pool's modes with number keys 1/2/3…, or cycle with "m". */
+const MODE_POOLS = {
+  race: ["gap", "interval", "tyre"],
+};
+const DEFAULT_POOL = ["gap"]; // quali, practice, time trial, unknown, …
+
+const poolFor = (kind) => MODE_POOLS[kind] || DEFAULT_POOL;
+
+let modes = DEFAULT_POOL; // active pool; re-selected from the session each update
+let modeIndex = 0;        // index into `modes`
+let lastState = null;     // re-rendered on mode change so new values appear at once
 let switching = false;
 
-const norm = (i) => ((i % MODES.length) + MODES.length) % MODES.length;
+const norm = (i) => ((i % modes.length) + modes.length) % modes.length;
+
+// Re-select the active pool when the session kind changes, keeping the current
+// mode if it's still offered, otherwise falling back to the pool's first mode.
+function setModePool(kind) {
+  const next = poolFor(kind);
+  if (next === modes) return; // same pool — nothing to do
+  const current = modes[modeIndex];
+  modes = next;
+  const keep = modes.indexOf(current);
+  modeIndex = keep >= 0 ? keep : 0;
+}
 
 // Instantly apply a mode (no animation) — used at startup.
 function applyMode(i) {
@@ -60,13 +84,16 @@ function switchMode(i) {
 }
 
 window.addEventListener("keydown", (e) => {
-  if (e.key >= "1" && e.key <= String(MODES.length)) switchMode(Number(e.key) - 1);
+  // Number keys pick a mode within the current pool; out-of-range keys are
+  // ignored (e.g. "2"/"3" do nothing in a single-mode quali).
+  if (e.key >= "1" && e.key <= String(modes.length)) switchMode(Number(e.key) - 1);
   else if (e.key.toLowerCase() === "m") switchMode(modeIndex + 1);
 });
 
-// Optional deep-link: open #gap / #interval / #tyre to start in that mode.
+// Optional deep-link: open #gap / #interval / #tyre to start in that mode (only
+// if that mode is in the current pool).
 function modeFromHash() {
-  const i = MODES.indexOf(location.hash.slice(1).toLowerCase());
+  const i = modes.indexOf(location.hash.slice(1).toLowerCase());
   return i >= 0 ? i : 0;
 }
 window.addEventListener("hashchange", () => switchMode(modeFromHash()));
@@ -165,7 +192,7 @@ function renderStatusBlock(refs, car) {
 // compound letter, which is colour-coded, bold, and shown in every mode.
 // Out-of-race (DNF/DSQ/DNS/NC) and PIT states replace BOTH the metric and tyre.
 function renderRightColumn(refs, car, rank) {
-  const mode = MODES[modeIndex];
+  const mode = modes[modeIndex];
   const main = refs.valMain;
 
   // Out of the race: a single status label, no metric, no tyre.
@@ -229,6 +256,9 @@ function fmtCountdown(sec) {
 
 function render(state) {
   lastState = state;
+  // Pick the mode pool for this session before rendering rows, so the right
+  // column only offers modes valid for the session type.
+  setModePool(state.session.infoKind);
   renderHeader(state.session);
 
   const seen = new Set();
