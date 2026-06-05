@@ -121,6 +121,9 @@ class GameState:
                 "statusLabel": status_label,        # "DNF"/"DSQ"/"DNS"/"NC" or None
                 "retired": status_label is not None,  # greys out the row
                 "finished": lap["result_status"] == fp.RESULT_FINISHED,
+                "onOutLap": lap["driver_status"] == fp.DRIVER_STATUS_OUT_LAP,
+                "noTime": lap["last_lap_ms"] == 0,  # no completed lap = no gap yet
+
                 "tyre": tyre_label,
                 "tyreColour": tyre_colour,
                 "tyreAge": stat.get("tyre_age_laps", 0),

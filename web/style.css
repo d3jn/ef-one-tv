@@ -202,6 +202,9 @@ html, body {
 }
 /* DNF/DSQ/DNS/NC label (row is already greyed; keep the text bold). */
 .status-out { font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); }
+/* Quali placeholders in the gap column ("No time" / "Out lap") — dimmed so they
+   read as a state, not a value. */
+.val-note { color: var(--ink-dim); font-weight: 600; }
 
 /* Penalty board: a black tab that sticks out past the row's right edge, shown
    only for drivers carrying unserved penalties. Holds the accumulated time

@@ -26,6 +26,12 @@ OUT_STATES = {16: 1, 17: 5, 18: 4, 19: 7}
 # also carries penalties, to show the flag takes priority over the penalty board.
 FINISHED = {4, 5, 6}
 
+# Quali demo (visible when session_packet is sent with a quali type): cars on an
+# out lap (driverStatus 3 -> "Out lap") and cars with no lap set (lastLap 0 ->
+# "No time"). Car 12 is both, to show "Out lap" takes priority over "No time".
+OUT_LAP_CARS = {3, 12}
+NO_TIME_CARS = {12, 14, 15}
+
 # Car index → (time-penalty seconds, unserved drive-through count), to demo the
 # penalty board: "+5", "DT", "+3 DT", "+13".
 PENALTIES = {2: (5, 0), 3: (0, 1), 4: (3, 1), 9: (13, 0)}
@@ -82,12 +88,12 @@ def participants_packet(frame):
     return header(fp.PACKET_PARTICIPANTS, frame) + body
 
 
-def session_packet(frame):
-    # weather, trackTemp, airTemp, totalLaps, trackLength, sessionType=15(Race),
-    # trackId=10(Spa), then enough trailing fields to satisfy SESSION_PRE_FMT.
+def session_packet(frame, session_type=15):
+    # weather, trackTemp, airTemp, totalLaps, trackLength, sessionType (15=Race,
+    # 5=Q1, …), trackId=10(Spa), then trailing fields to satisfy SESSION_PRE_FMT.
     body = struct.pack(
         fp.SESSION_PRE_FMT,
-        1, 30, 24, 44, 7004, 15, 10, 0, 3600, 3600, 80, 0, 0, 0, 0, 0,
+        1, 30, 24, 44, 7004, session_type, 10, 0, 3600, 3600, 80, 0, 0, 0, 0, 0,
     )
     return header(fp.PACKET_SESSION, frame) + body
 
@@ -103,8 +109,12 @@ def lap_packet(frame, t):
             gap_ms = 0 if i == 0 else max(0, int(i * 1100 + math.sin(t + i) * 400))
             interval_ms = 0 if i == 0 else int(900 + math.sin(t * 0.7 + i) * 350)
             last_lap_ms = int(92000 + i * 120 + math.sin(t * 0.1 + i) * 300)
+            if i in NO_TIME_CARS:
+                last_lap_ms = 0           # never crossed the line -> "No time"
             lap_num = 12
             pit = 1 if (i == 7 and int(t) % 40 < 4) else 0
+            # 3 = out lap, 4 = on track (default for a circulating car).
+            driver_status = 3 if i in OUT_LAP_CARS else 4
             # A few cars out of the race, to exercise the status labels:
             # resultStatus 1=inactive(DNS), 4=DNF, 5=DSQ, 7=retired(DNF).
             result = 3 if i in FINISHED else OUT_STATES.get(i, 2)
@@ -112,7 +122,7 @@ def lap_packet(frame, t):
         else:
             position = 0
             gap_ms = interval_ms = last_lap_ms = lap_num = pit = result = 0
-            pen_sec = drive_through = 0
+            pen_sec = drive_through = driver_status = 0
 
         gap_min, gap_rem = divmod(gap_ms, 60000)
         int_min, int_rem = divmod(interval_ms, 60000)
@@ -125,7 +135,7 @@ def lap_packet(frame, t):
             i * 250.0, i * 250.0, 0.0,             # lapDistance, totalDistance, scDelta
             position, lap_num, pit, 1, 0, 0,       # pos, lapNum, pit, numStops, sector, invalid
             pen_sec, 0, 0,                         # penalties, totalWarn, cornerCutWarn
-            drive_through, 0, 0, 0,                # unservedDT, unservedSG, grid, driverStatus
+            drive_through, 0, 0, driver_status,    # unservedDT, unservedSG, grid, driverStatus
             result,                                # resultStatus
             0, 0, 0, 0,                            # pitLane timer fields
             0.0, 255,                              # speedTrap fastest speed/lap

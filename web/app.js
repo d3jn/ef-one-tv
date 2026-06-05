@@ -21,8 +21,9 @@ const rows = new Map(); // carIndex -> { el, refs }
  * the active pool's modes with number keys 1/2/3…, or cycle with "m". */
 const MODE_POOLS = {
   race: ["gap", "interval", "tyre"],
+  quali: ["gap_quali"], // qualifying gap, with "No time" / "Out lap" labels
 };
-const DEFAULT_POOL = ["gap"]; // quali, practice, time trial, unknown, …
+const DEFAULT_POOL = ["gap"]; // practice, time trial, unknown, …
 
 const poolFor = (kind) => MODE_POOLS[kind] || DEFAULT_POOL;
 
@@ -220,6 +221,20 @@ function renderRightColumn(refs, car, rank) {
     const age = car.tyreAge;
     main.textContent = `${age} ${age === 1 ? "lap" : "laps"}`;
     refs.gap.classList.remove("leader");
+  } else if (mode === "gap_quali") {
+    // Qualifying gap. "Out lap" takes priority (a driver leaving the pits has no
+    // representative gap yet); then "No time" before a first lap is set.
+    refs.gap.classList.remove("leader");
+    if (car.onOutLap) {
+      main.innerHTML = `<span class="val-note">Out lap</span>`;
+    } else if (car.noTime) {
+      main.innerHTML = `<span class="val-note">No time</span>`;
+    } else if (rank === 0) {
+      main.textContent = "Gap";
+      refs.gap.classList.add("leader");
+    } else {
+      main.textContent = car.gapToLeader || "—";
+    }
   } else if (rank === 0) {
     main.textContent = mode === "gap" ? "Gap" : "Interval";
     refs.gap.classList.add("leader");

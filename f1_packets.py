@@ -116,6 +116,10 @@ RESULT_LABELS = {
 
 RESULT_FINISHED = 3  # m_resultStatus: completed the race (gets a finish flag)
 
+# m_driverStatus values (0=in garage, 1=flying lap, 2=in lap, 3=out lap,
+# 4=on track). The out-lap state drives the quali "Out lap" label.
+DRIVER_STATUS_OUT_LAP = 3
+
 
 def result_label(result_status):
     """Out-of-race label (DNF/DSQ/DNS/NC), or None when racing/finished."""
@@ -208,6 +212,7 @@ def parse_lap(data):
             "sector": l[17],             # 0 = S1, 1 = S2, 2 = S3
             "penalties_sec": l[19],       # accumulated time penalty (seconds)
             "drive_through": l[22],       # unserved drive-through penalties
+            "driver_status": l[25],       # 3 = out lap (see DRIVER_STATUS_OUT_LAP)
             "result_status": l[26],
         })
         offset += LAP_DATA_SIZE
