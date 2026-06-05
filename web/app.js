@@ -256,6 +256,7 @@ function renderHeader(s) {
   if (s.brandMark != null) document.getElementById("brand-mark").textContent = s.brandMark;
   document.getElementById("track").textContent = s.track;
   document.getElementById("session-type").textContent = s.type;
+  renderFlag(s.flag);
 
   const info = document.getElementById("session-info");
   if (s.infoKind === "race") {
@@ -266,6 +267,20 @@ function renderHeader(s) {
     info.classList.remove("hidden");
   } else {
     info.classList.add("hidden");
+  }
+}
+
+// Session-flag tab. `flag` is {text, kind:"yellow"|"green"} or null. While
+// hidden we keep the last text/colour so it slides out with its content intact.
+function renderFlag(flag) {
+  const el = document.getElementById("flag-block");
+  if (flag) {
+    if (el.textContent !== flag.text) el.textContent = flag.text;
+    el.classList.toggle("green", flag.kind === "green");
+    el.classList.toggle("yellow", flag.kind !== "green");
+    el.classList.add("show");
+  } else {
+    el.classList.remove("show");
   }
 }
 

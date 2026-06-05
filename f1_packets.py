@@ -43,6 +43,13 @@ PARTICIPANT_DATA_SIZE = struct.calcsize(PARTICIPANT_DATA_FMT)  # 57
 # paused(B) spectating(B) spectatorIdx(B) sliPro(B) numMarshalZones(B).
 SESSION_PRE_FMT = "<BbbBHBbBHHBBBBBB"
 
+# After the pre-marshal block comes a fixed array of 21 MarshalZones (each a
+# float zoneStart + int8 zoneFlag), then m_safetyCarStatus. zoneFlag: -1=invalid,
+# 0=none, 1=green, 2=blue, 3=yellow. safetyCarStatus: 0=none, 1=full, 2=virtual.
+MARSHAL_ZONE_FMT = "<fb"
+MARSHAL_ZONE_SIZE = struct.calcsize(MARSHAL_ZONE_FMT)  # 5
+MAX_MARSHAL_ZONES = 21
+
 # Session History (packet 11, one car per packet, 1460 bytes). Fixed-size arrays:
 # 100 lap-history entries followed by 8 tyre-stint slots. We only need the
 # best-lap lap number and the tyre stints, so we skip over the lap array.
@@ -57,6 +64,7 @@ MAX_TYRE_STINTS = 8
 # Packet IDs (subset we consume).
 PACKET_SESSION = 1
 PACKET_LAP = 2
+PACKET_EVENT = 3
 PACKET_PARTICIPANTS = 4
 PACKET_CAR_TELEMETRY = 6
 PACKET_CAR_STATUS = 7
@@ -268,6 +276,16 @@ def parse_num_active_cars(data):
 
 def parse_session(data):
     s = struct.unpack_from(SESSION_PRE_FMT, data, HEADER_SIZE)
+    num_zones = min(s[15], MAX_MARSHAL_ZONES)
+    zones_off = HEADER_SIZE + struct.calcsize(SESSION_PRE_FMT)
+    marshal_yellow = False
+    for i in range(num_zones):
+        _, zflag = struct.unpack_from(MARSHAL_ZONE_FMT, data, zones_off + i * MARSHAL_ZONE_SIZE)
+        if zflag == 3:  # yellow
+            marshal_yellow = True
+            break
+    sc_off = zones_off + MAX_MARSHAL_ZONES * MARSHAL_ZONE_SIZE
+    safety_car_status = struct.unpack_from("<B", data, sc_off)[0]
     return {
         "total_laps": s[3],
         "session_type": s[5],
@@ -275,7 +293,22 @@ def parse_session(data):
         "track_id": s[6],
         "track_name": track_name(s[6]),
         "session_time_left": s[8],   # seconds remaining (quali countdown)
+        "marshal_yellow": marshal_yellow,
+        "safety_car_status": safety_car_status,  # 0 none, 1 full SC, 2 VSC
     }
+
+
+def parse_event(data):
+    """Event packet: a 4-char code plus a type-specific detail union. We only
+    decode the safety-car event ("SCAR"), whose detail is safetyCarType +
+    eventType (0 Deployed, 1 Returning, 2 Returned, 3 Resume Race)."""
+    code = bytes(data[HEADER_SIZE:HEADER_SIZE + 4]).decode("ascii", errors="replace")
+    out = {"code": code}
+    if code == "SCAR":
+        sc_type, event_type = struct.unpack_from("<BB", data, HEADER_SIZE + 4)
+        out["safety_car_type"] = sc_type
+        out["safety_car_event"] = event_type
+    return out
 
 
 def parse_session_history(data):

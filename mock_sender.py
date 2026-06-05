@@ -98,14 +98,36 @@ def participants_packet(frame):
     return header(fp.PACKET_PARTICIPANTS, frame) + body
 
 
-def session_packet(frame, session_type=15):
+def session_packet(frame, session_type=15, yellow=False, safety_car=0):
     # weather, trackTemp, airTemp, totalLaps, trackLength, sessionType (15=Race,
-    # 5=Q1, …), trackId=10(Spa), then trailing fields to satisfy SESSION_PRE_FMT.
-    body = struct.pack(
+    # 5=Q1, …), trackId=10(Spa), …, numMarshalZones=21. Followed by the 21
+    # MarshalZones (zone 0 yellow if `yellow`) and m_safetyCarStatus.
+    pre = struct.pack(
         fp.SESSION_PRE_FMT,
-        1, 30, 24, 44, 7004, session_type, 10, 0, 3600, 3600, 80, 0, 0, 0, 0, 0,
+        1, 30, 24, 44, 7004, session_type, 10, 0, 3600, 3600, 80, 0, 0, 0, 0, 21,
     )
-    return header(fp.PACKET_SESSION, frame) + body
+    zones = b"".join(
+        struct.pack(fp.MARSHAL_ZONE_FMT, i / fp.MAX_MARSHAL_ZONES,
+                    3 if (yellow and i == 0) else 0)
+        for i in range(fp.MAX_MARSHAL_ZONES)
+    )
+    return header(fp.PACKET_SESSION, frame) + pre + zones + struct.pack("<B", safety_car)
+
+
+def scar_event(frame, sc_type, event_type):
+    # Safety-car event ("SCAR"): safetyCarType + eventType (3 = Resume Race).
+    body = b"SCAR" + struct.pack("<BB", sc_type, event_type)
+    return header(fp.PACKET_EVENT, frame) + body
+
+
+def flag_demo(t):
+    """Cycle flag states for the demo: clear → yellow → VSC → SC → resume."""
+    phase = int(t) % 32
+    if phase < 6:   return (False, 0)   # normal racing (no indicator)
+    if phase < 14:  return (True, 0)    # yellow flag
+    if phase < 20:  return (False, 2)   # VSC
+    if phase < 28:  return (False, 1)   # full SC
+    return (False, 0)                   # racing resumes (resume event on entry)
 
 
 def lap_packet(frame, t):
@@ -207,13 +229,19 @@ def main(session_type=SESSION_MODES["race"]):
     print(f"Sending mock F1 25 telemetry to {HOST}:{PORT} as {name} (Ctrl+C to stop)")
     start = time.monotonic()
     frame = 0
+    prev_sc = 0
     while True:
         t = time.monotonic() - start
         frame += 1
+        yellow, safety_car = flag_demo(t)
+        # When a safety car (full/VSC) just ended, fire a "Resume Race" event.
+        if prev_sc != 0 and safety_car == 0:
+            sock.sendto(scar_event(frame, prev_sc, 3), (HOST, PORT))
+        prev_sc = safety_car
         # Lower-frequency packets every ~1s; lap+telemetry+status every tick.
         if frame % 20 == 1:
             sock.sendto(participants_packet(frame), (HOST, PORT))
-            sock.sendto(session_packet(frame, session_type), (HOST, PORT))
+            sock.sendto(session_packet(frame, session_type, yellow, safety_car), (HOST, PORT))
         sock.sendto(lap_packet(frame, t), (HOST, PORT))
         sock.sendto(telemetry_packet(frame, t), (HOST, PORT))
         sock.sendto(status_packet(frame, t), (HOST, PORT))

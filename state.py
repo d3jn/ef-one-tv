@@ -5,8 +5,12 @@ participants once or twice a second). We keep the latest of each per car and
 build a single sorted "broadcast view" on demand for the web client.
 """
 
+import time
+
 import config
 import f1_packets as fp
+
+GREEN_FLAG_SECONDS = 3.0  # how long "GREEN FLAG" stays after a resume-race event
 
 
 def _fmt_lap_time(ms):
@@ -34,7 +38,11 @@ class GameState:
             "total_laps": 0,
             "session_type": 0,
             "session_time_left": 0,
+            "marshal_yellow": False,
+            "safety_car_status": 0,
         }
+        # Monotonic deadline until which "GREEN FLAG" shows after a resume event.
+        self.resume_racing_until = 0.0
         # Per-car latest packet fragments, indexed by car index (0..21).
         self.participants = [None] * fp.NUM_CARS
         self.lap = [None] * fp.NUM_CARS
@@ -67,11 +75,29 @@ class GameState:
             elif pid == fp.PACKET_SESSION_HISTORY:
                 hist = fp.parse_session_history(data)  # one car per packet
                 self.history[hist["car_idx"]] = hist
+            elif pid == fp.PACKET_EVENT:
+                ev = fp.parse_event(data)
+                if ev.get("code") == "SCAR" and ev.get("safety_car_event") == 3:
+                    self.resume_racing_until = time.monotonic() + GREEN_FLAG_SECONDS
             elif pid == fp.PACKET_SESSION:
                 self.session = fp.parse_session(data)
         except Exception:
             # A malformed packet shouldn't take the server down.
             return
+
+    def _flag_state(self):
+        """Current session flag for the header indicator, or None. Priority
+        (most important first): GREEN FLAG (resume window) > SC > VSC > yellow."""
+        if time.monotonic() < self.resume_racing_until:
+            return {"text": "GREEN FLAG", "kind": "green"}
+        sc = self.session.get("safety_car_status", 0)
+        if sc == 1:
+            return {"text": "SC", "kind": "yellow"}
+        if sc == 2:
+            return {"text": "VSC", "kind": "yellow"}
+        if self.session.get("marshal_yellow", False):
+            return {"text": "YELLOW FLAG", "kind": "yellow"}
+        return None
 
     def snapshot(self):
         """Build the JSON-serialisable broadcast view, sorted by position."""
@@ -156,6 +182,7 @@ class GameState:
                 "currentLap": leader_lap,
                 "timeLeft": self.session.get("session_time_left", 0),
                 "infoKind": fp.session_info_kind(self.session.get("session_type", 0)),
+                "flag": self._flag_state(),
             },
             "cars": rows,
         }
