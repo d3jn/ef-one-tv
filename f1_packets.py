@@ -43,12 +43,24 @@ PARTICIPANT_DATA_SIZE = struct.calcsize(PARTICIPANT_DATA_FMT)  # 57
 # paused(B) spectating(B) spectatorIdx(B) sliPro(B) numMarshalZones(B).
 SESSION_PRE_FMT = "<BbbBHBbBHHBBBBBB"
 
+# Session History (packet 11, one car per packet, 1460 bytes). Fixed-size arrays:
+# 100 lap-history entries followed by 8 tyre-stint slots. We only need the
+# best-lap lap number and the tyre stints, so we skip over the lap array.
+SESSION_HISTORY_HEAD_FMT = "<7B"  # carIdx, numLaps, numTyreStints, best{Lap,S1,S2,S3}LapNum
+LAP_HISTORY_FMT = "<IHBHBHBB"     # one lap entry
+LAP_HISTORY_SIZE = struct.calcsize(LAP_HISTORY_FMT)  # 14
+NUM_LAPS_IN_HISTORY = 100
+TYRE_STINT_FMT = "<3B"            # endLap (255=current), actualCompound, visualCompound
+TYRE_STINT_SIZE = struct.calcsize(TYRE_STINT_FMT)  # 3
+MAX_TYRE_STINTS = 8
+
 # Packet IDs (subset we consume).
 PACKET_SESSION = 1
 PACKET_LAP = 2
 PACKET_PARTICIPANTS = 4
 PACKET_CAR_TELEMETRY = 6
 PACKET_CAR_STATUS = 7
+PACKET_SESSION_HISTORY = 11
 
 NUM_CARS = 22
 
@@ -264,3 +276,32 @@ def parse_session(data):
         "track_name": track_name(s[6]),
         "session_time_left": s[8],   # seconds remaining (quali countdown)
     }
+
+
+def parse_session_history(data):
+    """One car's lap/tyre history. We keep the best-lap lap number and the tyre
+    stints (enough to find the compound used on the fastest lap)."""
+    h = struct.unpack_from(SESSION_HISTORY_HEAD_FMT, data, HEADER_SIZE)
+    num_stints = min(h[2], MAX_TYRE_STINTS)
+    stints_off = HEADER_SIZE + 7 + NUM_LAPS_IN_HISTORY * LAP_HISTORY_SIZE
+    stints = []
+    for i in range(num_stints):
+        s = struct.unpack_from(TYRE_STINT_FMT, data, stints_off + i * TYRE_STINT_SIZE)
+        stints.append({"end_lap": s[0], "visual": s[2]})
+    return {
+        "car_idx": h[0],
+        "best_lap_num": h[3],   # 0 if no lap set yet
+        "tyre_stints": stints,
+    }
+
+
+def fastest_lap_tyre(best_lap_num, tyre_stints):
+    """Visual compound id the fastest lap was set on, or None if unknown. The
+    stint covering the best lap is the first whose end_lap reaches it (the
+    current stint uses end_lap 255, so it covers any lap)."""
+    if not best_lap_num:
+        return None
+    for stint in tyre_stints:
+        if stint["end_lap"] >= best_lap_num:
+            return stint["visual"]
+    return None

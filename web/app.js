@@ -222,6 +222,12 @@ function renderRightColumn(refs, car, rank) {
     main.textContent = `${age} ${age === 1 ? "lap" : "laps"}`;
     refs.gap.classList.remove("leader");
   } else if (mode === "gap_quali") {
+    // Qualifying: the tyre shown is the compound the fastest lap was set on (from
+    // session history), falling back to the live tyre until history arrives.
+    if (car.bestTyre) {
+      refs.tyreLetter.textContent = car.bestTyre;
+      refs.tyreLetter.style.color = car.bestTyreColour;
+    }
     // Qualifying gap. "Out lap" takes priority (a driver leaving the pits has no
     // representative gap yet); then "No time" before a first lap is set.
     refs.gap.classList.remove("leader");

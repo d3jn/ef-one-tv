@@ -40,6 +40,7 @@ class GameState:
         self.lap = [None] * fp.NUM_CARS
         self.telemetry = [None] * fp.NUM_CARS
         self.status = [None] * fp.NUM_CARS
+        self.history = [None] * fp.NUM_CARS  # session-history (per car), for best-lap tyre
         self.num_active_cars = 0
 
     def update(self, data):
@@ -63,6 +64,9 @@ class GameState:
                 self.telemetry = fp.parse_car_telemetry(data)
             elif pid == fp.PACKET_CAR_STATUS:
                 self.status = fp.parse_car_status(data)
+            elif pid == fp.PACKET_SESSION_HISTORY:
+                hist = fp.parse_session_history(data)  # one car per packet
+                self.history[hist["car_idx"]] = hist
             elif pid == fp.PACKET_SESSION:
                 self.session = fp.parse_session(data)
         except Exception:
@@ -88,6 +92,14 @@ class GameState:
             team_name, team_colour = fp.team_info(team_id)
             team_logo = fp.team_logo(team_id)
             tyre_label, tyre_colour = fp.tyre_info(stat.get("visual_tyre"))
+            # Compound used on the fastest lap (from session history) — shown
+            # only in quali. None until history arrives / a lap is set.
+            best_tyre_label = best_tyre_colour = None
+            hist = self.history[idx]
+            if hist:
+                best_visual = fp.fastest_lap_tyre(hist["best_lap_num"], hist["tyre_stints"])
+                if best_visual is not None:
+                    best_tyre_label, best_tyre_colour = fp.tyre_info(best_visual)
             name = part.get("name") or ""
             number = part.get("race_number")
             is_human = part.get("ai_controlled", 1) == 0
@@ -127,6 +139,8 @@ class GameState:
                 "tyre": tyre_label,
                 "tyreColour": tyre_colour,
                 "tyreAge": stat.get("tyre_age_laps", 0),
+                "bestTyre": best_tyre_label,        # fastest-lap compound (quali)
+                "bestTyreColour": best_tyre_colour,
                 "drs": bool(tele.get("drs", 0)),
                 "speed": tele.get("speed", 0),
                 "isPlayer": idx == self.player_car_index,

@@ -4,8 +4,10 @@ f1_packets.py the server uses) — a 20-car grid that races, swaps places, pits,
 and toggles DRS.
 
 Run the server in one terminal, then:  python mock_sender.py
+Pick the session with --mode:        python mock_sender.py --mode quali
 """
 
+import argparse
 import math
 import socket
 import struct
@@ -17,6 +19,14 @@ import f1_packets as fp
 # Send to localhost on the same UDP port the server listens on (settings.json).
 HOST, PORT = "127.0.0.1", config.UDP_PORT
 NUM_ACTIVE = 20
+
+# --mode name → session type id sent in the session packet. Add more here to
+# emulate other session types (ids per f1_packets.SESSION_TYPES).
+SESSION_MODES = {
+    "race": 15,      # Race
+    "quali": 5,      # Qualifying (Q1)
+    "practice": 1,   # Practice (P1)
+}
 
 # Car index → resultStatus, to demo out-of-race labels (see lap_packet).
 # 1=inactive(DNS), 5=disqualified(DSQ), 4=didnotfinish(DNF), 7=retired(DNF).
@@ -174,9 +184,27 @@ def status_packet(frame, t):
     return header(fp.PACKET_CAR_STATUS, frame) + body
 
 
-def main():
+def session_history_packet(frame, car_idx):
+    # One car's history. Demo: a medium stint (laps 1-3) then a soft stint
+    # (current), with the fastest lap on lap 5 -> set on the soft. NO_TIME_CARS
+    # have no best lap (0). Live tyre cycles S/M/H, so quali shows the soft.
+    best_lap = 0 if car_idx in NO_TIME_CARS else 5
+    head = struct.pack("<7B", car_idx, 6, 2, best_lap, best_lap, best_lap, best_lap)
+    laps = b"".join(
+        struct.pack(fp.LAP_HISTORY_FMT, 92000 if (ln + 1) == best_lap else 0,
+                    0, 0, 0, 0, 0, 0, 1)
+        for ln in range(fp.NUM_LAPS_IN_HISTORY)
+    )
+    stints = struct.pack(fp.TYRE_STINT_FMT, 3, 11, 17)      # medium, ended lap 3
+    stints += struct.pack(fp.TYRE_STINT_FMT, 255, 16, 16)   # soft, current
+    stints += b"\x00" * (fp.TYRE_STINT_SIZE * (fp.MAX_TYRE_STINTS - 2))
+    return header(fp.PACKET_SESSION_HISTORY, frame) + head + laps + stints
+
+
+def main(session_type=SESSION_MODES["race"]):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print(f"Sending mock F1 25 telemetry to {HOST}:{PORT} (Ctrl+C to stop)")
+    name = fp.session_type_name(session_type)
+    print(f"Sending mock F1 25 telemetry to {HOST}:{PORT} as {name} (Ctrl+C to stop)")
     start = time.monotonic()
     frame = 0
     while True:
@@ -185,15 +213,24 @@ def main():
         # Lower-frequency packets every ~1s; lap+telemetry+status every tick.
         if frame % 20 == 1:
             sock.sendto(participants_packet(frame), (HOST, PORT))
-            sock.sendto(session_packet(frame), (HOST, PORT))
+            sock.sendto(session_packet(frame, session_type), (HOST, PORT))
         sock.sendto(lap_packet(frame, t), (HOST, PORT))
         sock.sendto(telemetry_packet(frame, t), (HOST, PORT))
         sock.sendto(status_packet(frame, t), (HOST, PORT))
+        # Session history is one car per packet; cycle through the grid (~1s
+        # for all 20), like the game does.
+        sock.sendto(session_history_packet(frame, frame % NUM_ACTIVE), (HOST, PORT))
         time.sleep(0.05)  # 20 Hz
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Emit synthetic F1 25 telemetry.")
+    parser.add_argument(
+        "--mode", choices=SESSION_MODES, default="race",
+        help="session type to emulate (default: race)",
+    )
+    args = parser.parse_args()
     try:
-        main()
+        main(SESSION_MODES[args.mode])
     except KeyboardInterrupt:
         pass
