@@ -116,6 +116,16 @@ def team_info(team_id):
     return TEAMS.get(team_id, DEFAULT_TEAM)
 
 
+def team_logo(team_id):
+    """Logo filename under web/teams/ for a team, or None when unknown.
+    The slug is the in-game team name lower-cased with spaces removed
+    (e.g. "Aston Martin" -> "astonmartin", "Kick Sauber" -> "kicksauber"),
+    matching the renamed files in web/teams/."""
+    if team_id not in TEAMS:
+        return None
+    return TEAMS[team_id][0].lower().replace(" ", "") + ".png"
+
+
 def tyre_info(visual_compound):
     return TYRES.get(visual_compound, DEFAULT_TYRE)
 
@@ -185,6 +195,8 @@ def parse_lap(data):
             "lap_num": l[14],
             "pit_status": l[15],          # 0 none, 1 pitting, 2 in pit area
             "sector": l[17],             # 0 = S1, 1 = S2, 2 = S3
+            "penalties_sec": l[19],       # accumulated time penalty (seconds)
+            "drive_through": l[22],       # unserved drive-through penalties
             "result_status": l[26],
         })
         offset += LAP_DATA_SIZE

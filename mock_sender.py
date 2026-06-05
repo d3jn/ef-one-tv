@@ -22,6 +22,10 @@ NUM_ACTIVE = 20
 # 1=inactive(DNS), 5=disqualified(DSQ), 4=didnotfinish(DNF), 7=retired(DNF).
 OUT_STATES = {16: 1, 17: 5, 18: 4, 19: 7}
 
+# Car index → (time-penalty seconds, unserved drive-through count), to demo the
+# penalty board: "+5", "DT", "+3 DT", "+13".
+PENALTIES = {2: (5, 0), 3: (0, 1), 4: (3, 1), 9: (13, 0)}
+
 DRIVERS = [
     ("M VERSTAPPEN", 1, 2), ("L NORRIS", 4, 8), ("C LECLERC", 16, 1),
     ("O PIASTRI", 81, 8), ("C SAINZ", 55, 3), ("G RUSSELL", 63, 0),
@@ -86,9 +90,11 @@ def lap_packet(frame, t):
             # A few cars out of the race, to exercise the status labels:
             # resultStatus 1=inactive(DNS), 4=DNF, 5=DSQ, 7=retired(DNF).
             result = OUT_STATES.get(i, 2)
+            pen_sec, drive_through = PENALTIES.get(i, (0, 0))
         else:
             position = 0
             gap_ms = interval_ms = last_lap_ms = lap_num = pit = result = 0
+            pen_sec = drive_through = 0
 
         gap_min, gap_rem = divmod(gap_ms, 60000)
         int_min, int_rem = divmod(interval_ms, 60000)
@@ -99,8 +105,9 @@ def lap_packet(frame, t):
             int_rem, int_min,                      # delta to car in front
             gap_rem, gap_min,                      # delta to race leader
             i * 250.0, i * 250.0, 0.0,             # lapDistance, totalDistance, scDelta
-            position, lap_num, pit, 1, 0, 0, 0, 0, # pos..cornerCutWarn
-            0, 0, 0, 0, 0,                         # unservedDT..driverStatus
+            position, lap_num, pit, 1, 0, 0,       # pos, lapNum, pit, numStops, sector, invalid
+            pen_sec, 0, 0,                         # penalties, totalWarn, cornerCutWarn
+            drive_through, 0, 0, 0,                # unservedDT, unservedSG, grid, driverStatus
             result,                                # resultStatus
             0, 0, 0, 0,                            # pitLane timer fields
             0.0, 255,                              # speedTrap fastest speed/lap

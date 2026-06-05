@@ -85,9 +85,10 @@ class GameState:
 
             team_id = part.get("team_id")
             team_name, team_colour = fp.team_info(team_id)
+            team_logo = fp.team_logo(team_id)
             tyre_label, tyre_colour = fp.tyre_info(stat.get("visual_tyre"))
             name = part.get("name") or ""
-            code = _driver_code(name, part.get("race_number"))
+            code = _driver_surname(name, part.get("race_number"))
             status_label = fp.result_label(lap["result_status"])  # None if racing
 
             rows.append({
@@ -98,11 +99,14 @@ class GameState:
                 "raceNumber": part.get("race_number", 0),
                 "team": team_name,
                 "teamColour": team_colour,
+                "teamLogo": team_logo,   # filename under /teams/, or None
                 "gapToLeader": _fmt_gap(lap["gap_to_leader_ms"]),
                 "interval": _fmt_gap(lap["interval_to_front_ms"]),
                 "lastLap": _fmt_lap_time(lap["last_lap_ms"]),
                 "lapNum": lap["lap_num"],
                 "pitting": lap["pit_status"] != 0,
+                "penaltySec": lap["penalties_sec"],   # unserved time penalty (s)
+                "driveThrough": lap["drive_through"] > 0,
                 "statusLabel": status_label,        # "DNF"/"DSQ"/"DNS"/"NC" or None
                 "retired": status_label is not None,  # greys out the row
                 "tyre": tyre_label,
@@ -127,11 +131,11 @@ class GameState:
         }
 
 
-def _driver_code(name, race_number):
-    """A 3-letter broadcast code from the driver name (fallback: car number)."""
+def _driver_surname(name, race_number):
+    """Full last name in caps from the driver name (fallback: car number)."""
     parts = [p for p in name.replace("_", " ").split() if p]
     if parts:
-        return parts[-1][:3].upper()
+        return parts[-1].upper()
     if race_number:
         return f"#{race_number}"
     return "—"

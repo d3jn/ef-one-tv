@@ -91,7 +91,8 @@ html, body {
   width: 100%;
   background: var(--panel);
   border-radius: 8px;
-  overflow: hidden;
+  /* overflow stays visible so penalty boards can stick out past the right
+     edge; the rounded corners are instead applied to the top/bottom rows. */
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(8px);
 }
@@ -117,6 +118,10 @@ html, body {
 }
 .row:nth-child(even) { background: var(--panel-row-alt); }
 .row.player { background: rgba(225, 6, 0, 0.18); }
+/* Round the visual top/bottom rows so the tower keeps its corners without
+   clipping overflow (rank-tagged in JS, since rows reorder via transform). */
+.row.top { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.row.bottom { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
 /* Drivers out of the race (DNF/DSQ/DNS/NC) — greyed out in the standings. */
 .row.retired { opacity: 0.45; filter: grayscale(1); }
 .row.entering { opacity: 0; }
@@ -142,7 +147,10 @@ html, body {
 }
 
 .driver { display: flex; align-items: center; gap: 9px; padding-left: 10px; min-width: 0; }
-.code { font-size: 17px; font-weight: 800; letter-spacing: 0.5px; }
+/* Team logo before the driver name. */
+.logo { width: 24px; height: 24px; object-fit: contain; flex: 0 0 auto; }
+.logo.hidden, .logo:not([src]), .logo[src=""] { display: none; }
+.code { font-size: 16px; font-weight: 800; letter-spacing: 0.4px; white-space: nowrap; }
 
 /* DRS pill */
 .drs {
@@ -185,4 +193,45 @@ html, body {
 }
 /* DNF/DSQ/DNS/NC label (row is already greyed; keep the text bold). */
 .status-out { font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); }
+
+/* Penalty board: a black tab that sticks out past the row's right edge, shown
+   only for drivers carrying unserved penalties. Holds the accumulated time
+   penalty ("+3") and/or a DT tag for an unserved drive-through. */
+.penalty {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  /* Resting (hidden) state: nudged left and faded out. Toggling .show slides it
+     right into place; removing .show slides it back left — a simple in/out. */
+  transform: translate(-18px, -50%);
+  margin-left: 6px;
+  display: inline-flex; /* always laid out; visibility is driven by opacity */
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  background: #000;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.22s ease;
+}
+.penalty.show { transform: translate(0, -50%); opacity: 1; }
+.pen-time { letter-spacing: 0.5px; }
+/* DT tag: white-on-black inverted so it reads as a distinct chip. */
+.pen-tag {
+  background: #fff;
+  color: #000;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
 

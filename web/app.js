@@ -87,6 +87,7 @@ function createRow(car) {
   el.innerHTML = `
     <div class="pos"></div>
     <div class="driver">
+      <img class="logo" alt="" />
       <span class="code"></span>
       <span class="drs">DRS</span>
     </div>
@@ -95,14 +96,17 @@ function createRow(car) {
         <span class="val-main"></span>
         <span class="tyre-letter"></span>
       </span>
-    </div>`;
+    </div>
+    <div class="penalty"></div>`;
   const refs = {
     pos: el.querySelector(".pos"),
+    logo: el.querySelector(".logo"),
     code: el.querySelector(".code"),
     drs: el.querySelector(".drs"),
     gap: el.querySelector(".gap"),
     valMain: el.querySelector(".val-main"),   // metric; slides/fades on mode switch
     tyreLetter: el.querySelector(".tyre-letter"), // compound; persists across modes
+    penalty: el.querySelector(".penalty"),    // unserved-penalty tab sticking out right
   };
   rowsEl.appendChild(el);
   // Drop the entering state next frame so the fade-in transition runs.
@@ -110,19 +114,43 @@ function createRow(car) {
   return { el, refs };
 }
 
-function updateRow(row, car, rank) {
+function updateRow(row, car, rank, total) {
   const { el, refs } = row;
   el.style.transform = `translateY(${rank * ROW_H}px)`;
   el.classList.toggle("player", car.isPlayer);
   el.classList.toggle("retired", car.retired);
+  el.classList.toggle("top", rank === 0);
+  el.classList.toggle("bottom", rank === total - 1);
   el.style.setProperty("--team", car.teamColour);
 
   refs.pos.textContent = car.position;
   refs.code.textContent = car.code;
 
+  // Team logo (hidden if we have no file for this team).
+  const logoSrc = car.teamLogo ? `teams/${car.teamLogo}` : "";
+  if (refs.logo.getAttribute("src") !== logoSrc) refs.logo.setAttribute("src", logoSrc);
+  refs.logo.classList.toggle("hidden", !car.teamLogo);
+
   refs.drs.classList.toggle("on", car.drs);
 
   renderRightColumn(refs, car, rank);
+  renderPenalty(refs, car);
+}
+
+// Penalty board: a black tab that pokes out to the right of the row, shown only
+// when a driver has an unserved time penalty and/or drive-through. Suppressed
+// for out-of-race drivers (their penalties no longer matter).
+function renderPenalty(refs, car) {
+  const parts = [];
+  if (!car.retired) {
+    if (car.penaltySec > 0) parts.push(`<span class="pen-time">+${car.penaltySec}</span>`);
+    if (car.driveThrough) parts.push(`<span class="pen-tag">DT</span>`);
+  }
+  const want = parts.length > 0;
+  // Only rewrite content when showing — keep the last content while it slides
+  // out so the board doesn't blank mid-animation.
+  if (want) refs.penalty.innerHTML = parts.join("");
+  refs.penalty.classList.toggle("show", want);
 }
 
 // The right-most column: a metric (mode-dependent) followed by the tyre
@@ -202,7 +230,7 @@ function render(state) {
       row = createRow(car);
       rows.set(car.carIndex, row);
     }
-    updateRow(row, car, rank);
+    updateRow(row, car, rank, state.cars.length);
   });
 
   // Remove rows for cars no longer in the field.
