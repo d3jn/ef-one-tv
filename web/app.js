@@ -24,8 +24,66 @@ const MODE_POOLS = {
   quali: ["gap_quali"], // qualifying gap, with "No time" / "Out lap" labels
 };
 const DEFAULT_POOL = ["gap"]; // practice, time trial, unknown, …
+// Modes the client knows how to render (see renderRightColumn). Pools coming
+// from settings.json are filtered to these, so a typo there can't break the UI.
+const KNOWN_MODES = ["gap", "interval", "tyre", "gap_quali"];
 
-const poolFor = (kind) => MODE_POOLS[kind] || DEFAULT_POOL;
+/* --- Auto mode rotation ---
+ * Refreshed from each snapshot's session.modeRotation (configured in
+ * settings.json). `pools` overrides the built-in MODE_POOLS per session kind
+ * (and sets the manual-cycle order); `durations` maps a mode to its on-screen
+ * seconds; `enabled` toggles only the auto-advance — manual switching always
+ * uses the pool. Backend kind "none" maps to the config's "other". */
+const ROTATION_DEFAULT_SECONDS = 5;
+let rotation = { enabled: false, pools: {}, durations: {} };
+
+// The active pool for a session kind: a configured (and known) pool wins,
+// otherwise the built-in fallback.
+function poolFor(kind) {
+  const key = kind === "none" ? "other" : kind;
+  const configured = (rotation.pools[key] || []).filter((m) => KNOWN_MODES.includes(m));
+  if (configured.length) return configured;
+  return MODE_POOLS[kind] || DEFAULT_POOL;
+}
+
+const samePool = (a, b) => a.length === b.length && a.every((m, i) => m === b[i]);
+
+/* --- Row ordering ---
+ * By default rows follow the order the server sends (sorted by game position).
+ * A mode can override that by registering an orderer here: it receives the cars
+ * array and returns a new array in display order, optionally stamping each car
+ * with a `displayPos` (the number shown in the position cell). This is how a
+ * mode can sort the table differently from the live race order. */
+const MODE_ORDER = {
+  gap_quali: orderQuali,
+};
+
+const orderFor = (mode) => MODE_ORDER[mode];
+
+// Qualifying order, immune to the game shuffling timeless drivers around:
+//   0) drivers with a valid lap time — fastest first (a driver who set a time
+//      then retired keeps their place here; the time still counts)
+//   1) the rest, on an out lap — alphabetical
+//   2) the rest, idle with no time — alphabetical
+//   3) drivers who retired without ever setting a time — very bottom, alphabetical
+// Positions are renumbered 1..N so the shown number is stable too. carIndex is
+// the final tiebreaker, so equal keys never swap frame to frame.
+function orderQuali(cars) {
+  const tier = (c) =>
+    c.bestLapMs > 0 ? 0 : c.retired ? 3 : c.onOutLap ? 1 : 2;
+  const ordered = cars.slice().sort((a, b) => {
+    const ta = tier(a), tb = tier(b);
+    if (ta !== tb) return ta - tb;
+    if (ta === 0 && a.bestLapMs !== b.bestLapMs) return a.bestLapMs - b.bestLapMs;
+    if (ta !== 0) {
+      const byName = a.code.localeCompare(b.code);
+      if (byName) return byName;
+    }
+    return a.carIndex - b.carIndex;
+  });
+  ordered.forEach((c, i) => { c.displayPos = i + 1; });
+  return ordered;
+}
 
 let modes = DEFAULT_POOL; // active pool; re-selected from the session each update
 let modeIndex = 0;        // index into `modes`
@@ -34,15 +92,66 @@ let switching = false;
 
 const norm = (i) => ((i % modes.length) + modes.length) % modes.length;
 
-// Re-select the active pool when the session kind changes, keeping the current
-// mode if it's still offered, otherwise falling back to the pool's first mode.
+// Re-select the active pool when the session kind (or its configured pool)
+// changes, keeping the current mode if it's still offered, otherwise falling
+// back to the pool's first mode. Compared by value (the configured pool is a
+// fresh array each call) and returns whether the pool actually changed.
 function setModePool(kind) {
   const next = poolFor(kind);
-  if (next === modes) return; // same pool — nothing to do
+  if (samePool(next, modes)) return false; // same pool — nothing to do
   const current = modes[modeIndex];
   modes = next;
   const keep = modes.indexOf(current);
   modeIndex = keep >= 0 ? keep : 0;
+  return true;
+}
+
+// --- Rotation timer ---------------------------------------------------------
+// A single self-rescheduling timeout walks the pool. We track the shown index
+// explicitly (rather than reading modeIndex, which switchMode updates a frame
+// late) so each mode gets its own duration even when they differ.
+let rotationTimer = null;
+let rotationEnabled = false; // last applied state, to detect on/off transitions
+
+const durationMs = (mode) => {
+  const s = rotation.durations[mode];
+  return (typeof s === "number" && s > 0 ? s : ROTATION_DEFAULT_SECONDS) * 1000;
+};
+
+function stopRotation() {
+  if (rotationTimer !== null) { clearTimeout(rotationTimer); rotationTimer = null; }
+}
+
+// (Re)start rotation, dwelling on `fromIdx` first. No-op (just stops) when
+// disabled or the pool has fewer than two modes.
+function restartRotation(fromIdx = modeIndex) {
+  stopRotation();
+  if (!rotation.enabled || modes.length < 2) return;
+  const tick = (idx) => {
+    rotationTimer = setTimeout(() => {
+      const next = norm(idx + 1);
+      switchMode(next);
+      tick(next);
+    }, durationMs(modes[idx]));
+  };
+  tick(norm(fromIdx));
+}
+
+// Refresh the rotation config from a snapshot. Called BEFORE setModePool, since
+// pool selection reads rotation.pools.
+function updateRotationConfig(modeRotation) {
+  rotation = {
+    enabled: !!(modeRotation && modeRotation.enabled),
+    pools: (modeRotation && modeRotation.pools) || {},
+    durations: (modeRotation && modeRotation.durations) || {},
+  };
+}
+
+// (Re)start the timer only when the pool or the enabled flag actually changed —
+// not every frame, or it would never get to advance.
+function applyRotationTimer(poolChanged) {
+  if (poolChanged || rotation.enabled !== rotationEnabled) restartRotation();
+  rotationEnabled = rotation.enabled;
 }
 
 // Instantly apply a mode (no animation) — used at startup.
@@ -84,11 +193,25 @@ function switchMode(i) {
   }, OUT);
 }
 
+// A manual mode pick switches and then resets the rotation dwell, so the chosen
+// mode gets its full duration before auto-advance resumes.
+function manualSwitch(i) {
+  const target = norm(i);
+  switchMode(target);
+  restartRotation(target);
+}
+
 window.addEventListener("keydown", (e) => {
-  // Number keys pick a mode within the current pool; out-of-range keys are
-  // ignored (e.g. "2"/"3" do nothing in a single-mode quali).
-  if (e.key >= "1" && e.key <= String(modes.length)) switchMode(Number(e.key) - 1);
-  else if (e.key.toLowerCase() === "m") switchMode(modeIndex + 1);
+  // Number keys 1–9 select strictly by position in the active pool (1 = first
+  // mode, 2 = second, …) — whatever modes the config put there, in that order.
+  // Nothing here is tied to a specific mode, so growing the pool needs no change
+  // (key 4 hits the 4th mode, etc.). Keys past the pool's length do nothing.
+  // "m" cycles forward through the pool.
+  if (e.key.toLowerCase() === "m") { manualSwitch(modeIndex + 1); return; }
+  const n = Number(e.key);
+  if (Number.isInteger(n) && n >= 1 && n <= Math.min(modes.length, 9)) {
+    manualSwitch(n - 1);
+  }
 });
 
 // Optional deep-link: open #gap / #interval / #tyre to start in that mode (only
@@ -97,7 +220,7 @@ function modeFromHash() {
   const i = modes.indexOf(location.hash.slice(1).toLowerCase());
   return i >= 0 ? i : 0;
 }
-window.addEventListener("hashchange", () => switchMode(modeFromHash()));
+window.addEventListener("hashchange", () => manualSwitch(modeFromHash()));
 applyMode(modeFromHash());
 
 /* --- Stage scaling: fit the fixed 1920×1080 surface to the window --- */
@@ -151,7 +274,8 @@ function updateRow(row, car, rank, total) {
   el.classList.toggle("bottom", rank === total - 1);
   el.style.setProperty("--team", car.teamColour);
 
-  refs.pos.textContent = car.position;
+  // A mode-supplied order may renumber positions (quali); else use the game's.
+  refs.pos.textContent = car.displayPos ?? car.position;
   refs.code.textContent = car.code;
 
   // Team logo (hidden if we have no file for this team).
@@ -159,7 +283,10 @@ function updateRow(row, car, rank, total) {
   if (refs.logo.getAttribute("src") !== logoSrc) refs.logo.setAttribute("src", logoSrc);
   refs.logo.classList.toggle("hidden", !car.teamLogo);
 
-  refs.drs.classList.toggle("on", car.drs);
+  // DRS is a race concept; hide the badge entirely in qualifying.
+  const quali = modes[modeIndex] === "gap_quali";
+  refs.drs.classList.toggle("hidden", quali);
+  refs.drs.classList.toggle("on", !quali && car.drs);
 
   renderRightColumn(refs, car, rank);
   renderStatusBlock(refs, car);
@@ -236,7 +363,8 @@ function renderRightColumn(refs, car, rank) {
     } else if (car.noTime) {
       main.innerHTML = `<span class="val-note">No time</span>`;
     } else if (rank === 0) {
-      main.textContent = "Gap";
+      // Leader: show their actual fastest-lap time, not a gap.
+      main.textContent = car.bestLap || "—";
       refs.gap.classList.add("leader");
     } else {
       main.textContent = car.gapToLeader || "—";
@@ -290,22 +418,45 @@ function fmtCountdown(sec) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
+// Place the standings overlay from config (px from the stage's top-left). Only
+// writes on change, so the 20 Hz stream doesn't thrash layout.
+let lastStandingsPos = "";
+function applyLayout(position) {
+  const st = position && position.standings;
+  if (!st) return;
+  const key = `${st.x},${st.y}`;
+  if (key === lastStandingsPos) return;
+  lastStandingsPos = key;
+  const panel = document.getElementById("panel");
+  panel.style.left = `${st.x}px`;
+  panel.style.top = `${st.y}px`;
+}
+
 function render(state) {
   lastState = state;
-  // Pick the mode pool for this session before rendering rows, so the right
-  // column only offers modes valid for the session type.
-  setModePool(state.session.infoKind);
+  applyLayout(state.session.position);
+  // Refresh rotation config first (pool selection reads it), then pick the mode
+  // pool for this session before rendering rows, so the right column only offers
+  // modes valid for the session type.
+  updateRotationConfig(state.session.modeRotation);
+  const poolChanged = setModePool(state.session.infoKind);
+  applyRotationTimer(poolChanged);
   renderHeader(state.session);
 
+  // Some modes (e.g. quali) impose their own stable row order; otherwise we
+  // keep the server's position sort.
+  const orderer = orderFor(modes[modeIndex]);
+  const cars = orderer ? orderer(state.cars) : state.cars;
+
   const seen = new Set();
-  state.cars.forEach((car, rank) => {
+  cars.forEach((car, rank) => {
     seen.add(car.carIndex);
     let row = rows.get(car.carIndex);
     if (!row) {
       row = createRow(car);
       rows.set(car.carIndex, row);
     }
-    updateRow(row, car, rank, state.cars.length);
+    updateRow(row, car, rank, cars.length);
   });
 
   // Remove rows for cars no longer in the field.

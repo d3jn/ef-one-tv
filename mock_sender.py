@@ -30,7 +30,9 @@ SESSION_MODES = {
 
 # Car index → resultStatus, to demo out-of-race labels (see lap_packet).
 # 1=inactive(DNS), 5=disqualified(DSQ), 4=didnotfinish(DNF), 7=retired(DNF).
-OUT_STATES = {16: 1, 17: 5, 18: 4, 19: 7}
+# Car 15 is also in NO_TIME_CARS: a driver who retired without setting a time,
+# to exercise the quali rule that sinks them to the very bottom.
+OUT_STATES = {15: 4, 16: 1, 17: 5, 18: 4, 19: 7}
 
 # Car indices that have finished the race (resultStatus 3 -> finish flag). Car 4
 # also carries penalties, to show the flag takes priority over the penalty board.
@@ -211,9 +213,12 @@ def session_history_packet(frame, car_idx):
     # (current), with the fastest lap on lap 5 -> set on the soft. NO_TIME_CARS
     # have no best lap (0). Live tyre cycles S/M/H, so quali shows the soft.
     best_lap = 0 if car_idx in NO_TIME_CARS else 5
+    # Scatter the lap times (~1:30–1:34) so they don't line up with car index —
+    # lets the quali fastest-to-slowest ordering actually be exercised.
+    best_time_ms = 90000 + (car_idx * 37) % 41 * 100
     head = struct.pack("<7B", car_idx, 6, 2, best_lap, best_lap, best_lap, best_lap)
     laps = b"".join(
-        struct.pack(fp.LAP_HISTORY_FMT, 92000 if (ln + 1) == best_lap else 0,
+        struct.pack(fp.LAP_HISTORY_FMT, best_time_ms if (ln + 1) == best_lap else 0,
                     0, 0, 0, 0, 0, 0, 1)
         for ln in range(fp.NUM_LAPS_IN_HISTORY)
     )

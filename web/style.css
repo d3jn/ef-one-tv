@@ -200,6 +200,7 @@ html, body {
   color: var(--ink-dim);
   flex: 0 0 auto;
 }
+.drs.hidden { display: none; }
 .drs.on {
   color: #001b0a;
   background: #00e676;

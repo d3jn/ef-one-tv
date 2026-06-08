@@ -315,15 +315,23 @@ def parse_session_history(data):
     """One car's lap/tyre history. We keep the best-lap lap number and the tyre
     stints (enough to find the compound used on the fastest lap)."""
     h = struct.unpack_from(SESSION_HISTORY_HEAD_FMT, data, HEADER_SIZE)
+    laps_off = HEADER_SIZE + 7
     num_stints = min(h[2], MAX_TYRE_STINTS)
-    stints_off = HEADER_SIZE + 7 + NUM_LAPS_IN_HISTORY * LAP_HISTORY_SIZE
+    stints_off = laps_off + NUM_LAPS_IN_HISTORY * LAP_HISTORY_SIZE
     stints = []
     for i in range(num_stints):
         s = struct.unpack_from(TYRE_STINT_FMT, data, stints_off + i * TYRE_STINT_SIZE)
         stints.append({"end_lap": s[0], "visual": s[2]})
+    # Time (ms) of the fastest lap — the first field of its lap-history entry.
+    best_lap_num = h[3]   # 0 if no lap set yet; otherwise 1-based
+    best_lap_time_ms = 0
+    if 0 < best_lap_num <= NUM_LAPS_IN_HISTORY:
+        lap = struct.unpack_from(LAP_HISTORY_FMT, data, laps_off + (best_lap_num - 1) * LAP_HISTORY_SIZE)
+        best_lap_time_ms = lap[0]
     return {
         "car_idx": h[0],
-        "best_lap_num": h[3],   # 0 if no lap set yet
+        "best_lap_num": best_lap_num,
+        "best_lap_time_ms": best_lap_time_ms,
         "tyre_stints": stints,
     }
 

@@ -121,11 +121,15 @@ class GameState:
             # Compound used on the fastest lap (from session history) — shown
             # only in quali. None until history arrives / a lap is set.
             best_tyre_label = best_tyre_colour = None
+            best_lap = ""
+            best_lap_ms = 0
             hist = self.history[idx]
             if hist:
                 best_visual = fp.fastest_lap_tyre(hist["best_lap_num"], hist["tyre_stints"])
                 if best_visual is not None:
                     best_tyre_label, best_tyre_colour = fp.tyre_info(best_visual)
+                best_lap_ms = hist["best_lap_time_ms"]
+                best_lap = _fmt_lap_time(best_lap_ms)
             name = part.get("name") or ""
             number = part.get("race_number")
             is_human = part.get("ai_controlled", 1) == 0
@@ -167,6 +171,8 @@ class GameState:
                 "tyreAge": stat.get("tyre_age_laps", 0),
                 "bestTyre": best_tyre_label,        # fastest-lap compound (quali)
                 "bestTyreColour": best_tyre_colour,
+                "bestLap": best_lap,                # fastest-lap time "M:SS.mmm" (quali)
+                "bestLapMs": best_lap_ms,           # raw, for quali ordering (0 = none)
                 "drs": bool(tele.get("drs", 0)),
                 "speed": tele.get("speed", 0),
                 "isPlayer": idx == self.player_car_index,
@@ -182,6 +188,8 @@ class GameState:
                 "currentLap": leader_lap,
                 "timeLeft": self.session.get("session_time_left", 0),
                 "infoKind": fp.session_info_kind(self.session.get("session_type", 0)),
+                "modeRotation": config.MODE_ROTATION,  # pools + auto-rotation (client-side)
+                "position": config.POSITION,           # overlay placement (client-side)
                 "flag": self._flag_state(),
             },
             "cars": rows,
