@@ -106,6 +106,13 @@ class GameState:
             (l["lap_num"] for l in self.lap if l and l["position"] > 0),
             default=0,
         )
+        # The "active" car to highlight: the spectated car while spectating,
+        # otherwise the player's own car (the header's m_playerCarIndex, which is
+        # meaningless during spectating). 255 = none, so nobody is highlighted.
+        if self.session.get("is_spectating"):
+            active_idx = self.session.get("spectator_car_index", 255)
+        else:
+            active_idx = self.player_car_index
         for idx in range(fp.NUM_CARS):
             lap = self.lap[idx]
             if not lap or lap["position"] <= 0:
@@ -175,10 +182,26 @@ class GameState:
                 "bestLapMs": best_lap_ms,           # raw, for quali ordering (0 = none)
                 "drs": bool(tele.get("drs", 0)),
                 "speed": tele.get("speed", 0),
-                "isPlayer": idx == self.player_car_index,
+                "isPlayer": idx == active_idx,  # active/spectated car (red highlight)
             })
 
         rows.sort(key=lambda r: r["position"])
+
+        # Current fastest lap of the race (race sessions only). Derived from the
+        # per-car best lap times we already track in session history — the
+        # quickest non-zero one — rather than the one-shot "FTLP" event, so it
+        # self-heals on packet loss and is correct even when the server joins
+        # mid-session. Exactly one car is flagged; none until a lap is set. A
+        # driver who set it then retired keeps the flag (the lap still stands).
+        info_kind = fp.session_info_kind(self.session.get("session_type", 0))
+        fastest_idx = None
+        if info_kind == "race":
+            timed = [r for r in rows if r["bestLapMs"] > 0]
+            if timed:
+                fastest_idx = min(timed, key=lambda r: r["bestLapMs"])["carIndex"]
+        for r in rows:
+            r["fastestLap"] = r["carIndex"] == fastest_idx
+
         return {
             "session": {
                 "brandMark": config.BRAND_MARK,
@@ -187,7 +210,7 @@ class GameState:
                 "totalLaps": self.session.get("total_laps", 0),
                 "currentLap": leader_lap,
                 "timeLeft": self.session.get("session_time_left", 0),
-                "infoKind": fp.session_info_kind(self.session.get("session_type", 0)),
+                "infoKind": info_kind,
                 "modeRotation": config.MODE_ROTATION,  # pools + auto-rotation (client-side)
                 "position": config.POSITION,           # overlay placement (client-side)
                 "flag": self._flag_state(),

@@ -154,6 +154,18 @@ html, body {
 .row.retired { opacity: 0.45; filter: grayscale(1); }
 .row.entering { opacity: 0; }
 
+/* Current fastest lap (race only): F1's purple. A row tint plus a purple accent
+   bar in place of the team colour, so the holder reads at a glance. Listed after
+   the .player/even rules (equal specificity) so it wins when they overlap; the
+   :nth-child variant outranks the alternating-row tint. */
+.row.fastest,
+.row.fastest:nth-child(even),
+.row.fastest.player { background: rgba(160, 32, 240, 0.26); }
+.row.fastest .pos::before {
+  background: #b026ff;
+  box-shadow: 0 0 10px rgba(176, 38, 255, 0.85);
+}
+
 /* Position cell with team-colour accent bar */
 .pos {
   position: relative;
@@ -173,6 +185,9 @@ html, body {
   width: 5px;
   background: var(--team, #888);
 }
+/* Active driver (the player, or the spectated car): solid red position square
+   with a white number, so the watched car stands out at a glance. */
+.row.player .pos { background: var(--accent); color: #fff; }
 
 .driver { display: flex; align-items: center; gap: 9px; padding-left: 10px; min-width: 0; }
 /* Team logo before the driver name. */

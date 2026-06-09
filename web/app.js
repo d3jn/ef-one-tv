@@ -270,6 +270,9 @@ function updateRow(row, car, rank, total) {
   el.style.transform = `translateY(${rank * ROW_H}px)`;
   el.classList.toggle("player", car.isPlayer);
   el.classList.toggle("retired", car.retired);
+  // Holder of the race's fastest lap (race sessions only; backend sends false
+  // otherwise). Purple, the way broadcast graphics mark it.
+  el.classList.toggle("fastest", !!car.fastestLap);
   el.classList.toggle("top", rank === 0);
   el.classList.toggle("bottom", rank === total - 1);
   el.style.setProperty("--team", car.teamColour);

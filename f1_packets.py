@@ -295,6 +295,11 @@ def parse_session(data):
         "session_time_left": s[8],   # seconds remaining (quali countdown)
         "marshal_yellow": marshal_yellow,
         "safety_car_status": safety_car_status,  # 0 none, 1 full SC, 2 VSC
+        # Spectator state: who's being watched. m_playerCarIndex is meaningless
+        # while spectating, so the spectated index is the authoritative "active
+        # car" then (see GameState.snapshot).
+        "is_spectating": bool(s[12]),         # m_isSpectating
+        "spectator_car_index": s[13],         # m_spectatorCarIndex
     }
 
 
