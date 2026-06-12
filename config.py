@@ -59,14 +59,41 @@ DEFAULTS = {
 }
 
 
-def _base_dir():
+def app_dir():
+    """Directory to resolve config and resources from, cross-platform:
+
+    - Frozen build (PyInstaller / py2exe / cx_Freeze, detected via sys.frozen):
+      the directory containing the executable itself — so web/, settings.json,
+      driver_names.json sit next to the .exe and stay user-editable, instead of
+      the per-run temp/AppData extraction dir PyInstaller would otherwise use.
+    - Running from source: this module's directory (the project root).
+    """
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def resource_path(*parts):
+    """Absolute path to a bundled resource (e.g. resource_path("web")).
+
+    Prefers a copy sitting next to the executable / source (app_dir), so a loose
+    web/ folder shipped beside the .exe always wins and can be edited. For a
+    PyInstaller one-file build that embeds resources via --add-data, falls back
+    to the extraction dir (sys._MEIPASS) when nothing is found next to the exe.
+    """
+    candidate = os.path.join(app_dir(), *parts)
+    if os.path.exists(candidate):
+        return candidate
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = os.path.join(meipass, *parts)
+        if os.path.exists(bundled):
+            return bundled
+    return candidate  # fall through to the next-to-exe path for a clear error
+
+
 def load():
-    path = os.path.join(_base_dir(), "settings.json")
+    path = os.path.join(app_dir(), "settings.json")
     settings = dict(DEFAULTS)
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -85,7 +112,7 @@ def load_driver_names():
     """Load driver name overrides from driver_names.json (next to settings.json):
     a list of {source_name, source_number, target_name} objects. A missing file
     means no overrides; invalid JSON / read errors are fatal, matching load()."""
-    path = os.path.join(_base_dir(), "driver_names.json")
+    path = os.path.join(app_dir(), "driver_names.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)

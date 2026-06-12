@@ -31,7 +31,9 @@ HTTP_PORT = config.HTTP_PORT    # http://localhost:<HTTP_PORT>
 PUSH_HZ = config.PUSH_HZ        # snapshots/sec pushed to the browser
 RETRANSMIT_TO = config.RETRANSMIT_TO  # [(host, port), …] to mirror raw packets to
 
-WEB_DIR = Path(__file__).parent / "web"
+# Resolve web/ next to the executable (frozen) or the source tree, NOT via
+# __file__ — under PyInstaller that points into the temp extraction dir.
+WEB_DIR = Path(config.resource_path("web"))
 
 game = GameState()
 clients: set[WebSocket] = set()

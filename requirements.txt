@@ -1,2 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# Pulled in transitively by uvicorn[standard]; pinned explicitly so the WebSocket
+# implementation is documented and picked up by frozen (PyInstaller) builds.
+websockets>=10.4

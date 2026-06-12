@@ -88,6 +88,39 @@ Every key is optional — missing keys (or a missing file) fall back to these
 defaults. `server.py` and `mock_sender.py` both read `udp_port` from here, so
 they always agree.
 
+## Build a standalone executable
+
+The app resolves `web/`, `settings.json` and `driver_names.json` **next to the
+executable** when frozen (it checks `sys.frozen`; see `config.app_dir` /
+`config.resource_path`), so a PyInstaller build won't go hunting in the temp
+extraction dir.
+
+```bash
+pip install pyinstaller
+
+# One-file build. --collect-all pulls in modules uvicorn loads dynamically that
+# PyInstaller's static analysis otherwise misses — including the websockets
+# implementation behind the /ws endpoint.
+pyinstaller --onefile --name server \
+  --collect-all uvicorn --collect-all websockets \
+  server.py
+```
+
+Then ship the data files **next to the produced executable**:
+
+```
+server(.exe)
+web/                 ← the graphics (HTML/CSS/JS, teams/, other/)
+settings.json        ← optional; defaults apply if absent
+driver_names.json    ← optional; no overrides if absent
+```
+
+`settings.json` and `driver_names.json` are always read from beside the
+executable, so they stay editable after building. `web/` can either sit beside
+the executable (above) or be embedded in a one-file build with
+`--add-data "web:web"` (`web;web` on Windows) — `resource_path` prefers a loose
+copy next to the exe and falls back to the embedded one.
+
 ## Files
 
 | File | Role |
