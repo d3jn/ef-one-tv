@@ -140,6 +140,10 @@ RESULT_FINISHED = 3  # m_resultStatus: completed the race (gets a finish flag)
 # 4=on track). The out-lap state drives the quali "Out lap" label.
 DRIVER_STATUS_OUT_LAP = 3
 
+# ERS energy store is capped at 4 MJ (F1 regs); m_ersStoreEnergy is in Joules,
+# so battery % = energy / ERS_MAX_J * 100.
+ERS_MAX_J = 4_000_000.0
+
 
 def result_label(result_status):
     """Out-of-race label (DNF/DSQ/DNS/NC), or None when racing/finished."""
@@ -223,6 +227,8 @@ def parse_lap(data):
             "current_lap_ms": l[1],
             # Sector/delta times split as (msPart:H, minutesPart:B) to allow
             # values over 65s. Recombine to a single ms figure.
+            "sector1_ms": l[3] * 60000 + l[2],   # this lap's S1 (0 until crossed)
+            "sector2_ms": l[5] * 60000 + l[4],   # this lap's S2 (0 until crossed)
             "interval_to_front_ms": l[7] * 60000 + l[6],
             "gap_to_leader_ms": l[9] * 60000 + l[8],
             "lap_distance": l[10],
@@ -230,6 +236,7 @@ def parse_lap(data):
             "lap_num": l[14],
             "pit_status": l[15],          # 0 none, 1 pitting, 2 in pit area
             "sector": l[17],             # 0 = S1, 1 = S2, 2 = S3
+            "lap_invalid": l[18],         # 0 = valid, 1 = current lap invalidated
             "penalties_sec": l[19],       # accumulated time penalty (seconds)
             "drive_through": l[22],       # unserved drive-through penalties
             "driver_status": l[25],       # 3 = out lap (see DRIVER_STATUS_OUT_LAP)
@@ -249,6 +256,7 @@ def parse_car_status(data):
             "drs_allowed": s[11],
             "visual_tyre": s[14],
             "tyre_age_laps": s[15],
+            "ers_energy_j": s[19],        # ERS store in Joules (max ERS_MAX_J)
         })
         offset += CAR_STATUS_SIZE
     return out
@@ -316,9 +324,22 @@ def parse_event(data):
     return out
 
 
+def _hist_lap_sectors(data, laps_off, lap_num):
+    """The three sector times (ms) of a 1-based lap in a session-history array,
+    or (0, 0, 0) if the lap number is out of range. Each sector is stored split
+    as (msPart:H, minutesPart:B) so values over 65s fit; recombine to ms."""
+    if not (0 < lap_num <= NUM_LAPS_IN_HISTORY):
+        return (0, 0, 0)
+    lp = struct.unpack_from(LAP_HISTORY_FMT, data, laps_off + (lap_num - 1) * LAP_HISTORY_SIZE)
+    return (lp[2] * 60000 + lp[1], lp[4] * 60000 + lp[3], lp[6] * 60000 + lp[5])
+
+
 def parse_session_history(data):
-    """One car's lap/tyre history. We keep the best-lap lap number and the tyre
-    stints (enough to find the compound used on the fastest lap)."""
+    """One car's lap/tyre history. We keep the best-lap number/time and its three
+    sector splits (for the live sector panel's reference time), each sector's
+    personal-best time and the lap it was set on (for sector colouring — the
+    game only records valid sectors here, so invalid laps are excluded for
+    free), and the tyre stints (the compound used on the fastest lap)."""
     h = struct.unpack_from(SESSION_HISTORY_HEAD_FMT, data, HEADER_SIZE)
     laps_off = HEADER_SIZE + 7
     num_stints = min(h[2], MAX_TYRE_STINTS)
@@ -327,16 +348,26 @@ def parse_session_history(data):
     for i in range(num_stints):
         s = struct.unpack_from(TYRE_STINT_FMT, data, stints_off + i * TYRE_STINT_SIZE)
         stints.append({"end_lap": s[0], "visual": s[2]})
-    # Time (ms) of the fastest lap — the first field of its lap-history entry.
+    # Time (ms) + sector splits of the fastest lap (first field of its entry).
     best_lap_num = h[3]   # 0 if no lap set yet; otherwise 1-based
     best_lap_time_ms = 0
     if 0 < best_lap_num <= NUM_LAPS_IN_HISTORY:
-        lap = struct.unpack_from(LAP_HISTORY_FMT, data, laps_off + (best_lap_num - 1) * LAP_HISTORY_SIZE)
-        best_lap_time_ms = lap[0]
+        best_lap_time_ms = struct.unpack_from(LAP_HISTORY_FMT, data,
+                                              laps_off + (best_lap_num - 1) * LAP_HISTORY_SIZE)[0]
+    best_lap_sectors = _hist_lap_sectors(data, laps_off, best_lap_num)
+    # Per-sector personal bests: m_bestSector{1,2,3}LapNum point at the lap each
+    # was set on; pull that sector's time out of the matching lap entry.
+    best_sector_laps = (h[4], h[5], h[6])
+    best_sectors = tuple(
+        _hist_lap_sectors(data, laps_off, ln)[i] for i, ln in enumerate(best_sector_laps)
+    )
     return {
         "car_idx": h[0],
         "best_lap_num": best_lap_num,
         "best_lap_time_ms": best_lap_time_ms,
+        "best_lap_sectors_ms": best_lap_sectors,   # (s1, s2, s3) of the fastest lap
+        "best_sectors_ms": best_sectors,           # (s1, s2, s3) personal bests
+        "best_sector_laps": best_sector_laps,      # lap each personal-best sector was set on
         "tyre_stints": stints,
     }
 

@@ -1,14 +1,37 @@
-/* ef-one-tv client.
+/* Standings block: the broadcast timing tower.
  *
- * Connects to the server WebSocket, then renders the timing tower. Rows are
- * keyed by carIndex and positioned absolutely; on each update we set each row's
- * translateY to its rank. The CSS `transition: transform` does the rest, so
- * cars swapping places slide past each other the way they do on a TV feed.
+ * Rows are keyed by carIndex and positioned absolutely; on each update we set
+ * each row's translateY to its rank. The CSS `transition: transform` does the
+ * rest, so cars swapping places slide past each other the way they do on a TV
+ * feed. The right column shows a mode-dependent metric (gap / interval / tyre /
+ * quali gap), switchable by keyboard and auto-rotatable from settings.json.
  */
 
+import { registerBlock } from "../core/registry.js";
+import { fmtCountdown } from "../core/format.js";
+
 const ROW_H = 40;
-const rowsEl = document.getElementById("tower-rows");
-const rows = new Map(); // carIndex -> { el, refs }
+let rowsEl = null;             // #tower-rows, resolved in init() once mounted
+const rows = new Map();        // carIndex -> { el, refs }
+
+const TEMPLATE = `
+  <!-- Header sits directly above the tower, same width, small gap between. -->
+  <div id="panel">
+    <header id="topbar">
+      <span class="f1-mark" id="brand-mark">F1</span>
+      <div class="session-meta">
+        <span id="track">—</span>
+        <span class="sep">/</span>
+        <span id="session-type">—</span>
+      </div>
+      <div id="session-info"></div>
+      <div id="flag-block"></div>
+    </header>
+
+    <section id="tower">
+      <ol id="tower-rows"></ol>
+    </section>
+  </div>`;
 
 /* --- Right-column modes ---
  * The right column can show several metrics, but which ones are available
@@ -201,35 +224,12 @@ function manualSwitch(i) {
   restartRotation(target);
 }
 
-window.addEventListener("keydown", (e) => {
-  // Number keys 1–9 select strictly by position in the active pool (1 = first
-  // mode, 2 = second, …) — whatever modes the config put there, in that order.
-  // Nothing here is tied to a specific mode, so growing the pool needs no change
-  // (key 4 hits the 4th mode, etc.). Keys past the pool's length do nothing.
-  // "m" cycles forward through the pool.
-  if (e.key.toLowerCase() === "m") { manualSwitch(modeIndex + 1); return; }
-  const n = Number(e.key);
-  if (Number.isInteger(n) && n >= 1 && n <= Math.min(modes.length, 9)) {
-    manualSwitch(n - 1);
-  }
-});
-
 // Optional deep-link: open #gap / #interval / #tyre to start in that mode (only
 // if that mode is in the current pool).
 function modeFromHash() {
   const i = modes.indexOf(location.hash.slice(1).toLowerCase());
   return i >= 0 ? i : 0;
 }
-window.addEventListener("hashchange", () => manualSwitch(modeFromHash()));
-applyMode(modeFromHash());
-
-/* --- Stage scaling: fit the fixed 1920×1080 surface to the window --- */
-function fitStage() {
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  document.getElementById("stage").style.setProperty("--scale", scale);
-}
-window.addEventListener("resize", fitStage);
-fitStage();
 
 /* --- Row construction --- */
 function createRow(car) {
@@ -415,29 +415,9 @@ function renderFlag(flag) {
   }
 }
 
-// Seconds → "M:SS" (minutes unpadded, seconds zero-padded): 923 → "15:23".
-function fmtCountdown(sec) {
-  sec = Math.max(0, sec | 0);
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
-}
-
-// Place the standings overlay from config (px from the stage's top-left). Only
-// writes on change, so the 20 Hz stream doesn't thrash layout.
-let lastStandingsPos = "";
-function applyLayout(position) {
-  const st = position && position.standings;
-  if (!st) return;
-  const key = `${st.x},${st.y}`;
-  if (key === lastStandingsPos) return;
-  lastStandingsPos = key;
-  const panel = document.getElementById("panel");
-  panel.style.left = `${st.x}px`;
-  panel.style.top = `${st.y}px`;
-}
-
 function render(state) {
   lastState = state;
-  applyLayout(state.session.position);
+
   // Refresh rotation config first (pool selection reads it), then pick the mode
   // pool for this session before rendering rows, so the right column only offers
   // modes valid for the session type.
@@ -475,18 +455,23 @@ function render(state) {
   rowsEl.style.height = `${state.cars.length * ROW_H}px`;
 }
 
-/* --- WebSocket with auto-reconnect --- */
-function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+function init() {
+  rowsEl = document.getElementById("tower-rows");
 
-  ws.onmessage = (ev) => {
-    try {
-      render(JSON.parse(ev.data));
-    } catch (e) {
-      console.error("bad payload", e);
+  // Number keys 1–9 select strictly by position in the active pool (1 = first
+  // mode, 2 = second, …) — whatever modes the config put there, in that order.
+  // Nothing here is tied to a specific mode, so growing the pool needs no change
+  // (key 4 hits the 4th mode, etc.). Keys past the pool's length do nothing.
+  // "m" cycles forward through the pool.
+  window.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() === "m") { manualSwitch(modeIndex + 1); return; }
+    const n = Number(e.key);
+    if (Number.isInteger(n) && n >= 1 && n <= Math.min(modes.length, 9)) {
+      manualSwitch(n - 1);
     }
-  };
-  ws.onclose = () => setTimeout(connect, 1000); // retry until the server is back
-  ws.onerror = () => ws.close();
+  });
+  window.addEventListener("hashchange", () => manualSwitch(modeFromHash()));
+  applyMode(modeFromHash());
 }
-connect();
+
+registerBlock({ name: "standings", template: TEMPLATE, init, render });

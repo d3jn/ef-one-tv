@@ -12,6 +12,12 @@ import f1_packets as fp
 
 GREEN_FLAG_SECONDS = 3.0  # how long "GREEN FLAG" stays after a resume-race event
 
+# --- Sector-panel visibility rules (quali) ---
+ERS_SHOW_THRESHOLD = 50.0     # % battery required at lap start to show the panel
+PANEL_DELTA_HIDE_MS = 2000    # hide if a crossing is >2s slower than the fastest lap
+PANEL_FLASH_HOLD = 2.2        # s to keep the panel alive after a shown lap's last
+                              # crossing, so the delta flash (2s) always completes
+
 
 def _fmt_lap_time(ms):
     """Milliseconds → "M:SS.mmm" (or "" when no time set)."""
@@ -49,6 +55,20 @@ class GameState:
         self.telemetry = [None] * fp.NUM_CARS
         self.status = [None] * fp.NUM_CARS
         self.history = [None] * fp.NUM_CARS  # session-history (per car), for best-lap tyre
+        # Which sectors of the lap currently shown in the sector panel are done,
+        # per car: {"lap": int, "done": [s1, s2, s3]}. Advanced from live lap
+        # data (see _update_sector_view) so S3 can light at the line.
+        self.sector_view = [None] * fp.NUM_CARS
+        # Per-car (lap, sector) last seen, to detect S1/S2/line crossings, and
+        # the most recent crossing's split (for the panel's delta flash).
+        self.prev_sector = [None] * fp.NUM_CARS
+        self.delta_event = [None] * fp.NUM_CARS
+        # Per-car sector-panel visibility (quali): whether it's shown, the lap it
+        # was shown for, and a force-show deadline that lets a crossing's delta
+        # flash finish even when the panel would otherwise hide.
+        self.panel_shown = [False] * fp.NUM_CARS
+        self.panel_shown_lap = [0] * fp.NUM_CARS
+        self.panel_hold_until = [0.0] * fp.NUM_CARS
         self.num_active_cars = 0
 
     def update(self, data):
@@ -68,6 +88,7 @@ class GameState:
                 self.num_active_cars = fp.parse_num_active_cars(data)
             elif pid == fp.PACKET_LAP:
                 self.lap = fp.parse_lap(data)
+                self._update_sector_view()
             elif pid == fp.PACKET_CAR_TELEMETRY:
                 self.telemetry = fp.parse_car_telemetry(data)
             elif pid == fp.PACKET_CAR_STATUS:
@@ -98,6 +119,218 @@ class GameState:
         if self.session.get("marshal_yellow", False):
             return {"text": "YELLOW FLAG", "kind": "yellow"}
         return None
+
+    def _update_sector_view(self):
+        """Advance each car's sector-panel state from the latest lap data. The
+        three boxes track the lap a car is currently running: S1 lights when it
+        enters S2, S2 when it enters S3, and S3 at the line (lap completion).
+        The completed row stays up until the car crosses S1 of the next lap,
+        which then becomes the displayed lap (mirrors how a broadcast holds your
+        just-set sectors as you start the next lap)."""
+        for idx in range(fp.NUM_CARS):
+            l = self.lap[idx]
+            if not l or l["position"] <= 0:
+                self.sector_view[idx] = None
+                self.prev_sector[idx] = None
+                self.panel_shown[idx] = False
+                self.panel_hold_until[idx] = 0.0
+                continue
+            lap_num, sector = l["lap_num"], l["sector"]  # sector: 0=S1, 1=S2, 2=S3
+
+            # Detect S1/S2/line crossings (for the delta flash + visibility) from
+            # raw (lap, sector) transitions — independent of the display state.
+            prev = self.prev_sector[idx]
+            if prev is not None:
+                plap, psec = prev
+                if lap_num == plap and sector > psec:
+                    if psec == 0 and sector >= 1:
+                        self._record_delta(idx, l, lap_num, 0)   # crossed S1
+                    if psec <= 1 and sector >= 2:
+                        self._record_delta(idx, l, lap_num, 1)   # crossed S2
+                elif lap_num == plap + 1:
+                    self._record_delta(idx, l, plap, 2)          # crossed the line
+                    self._eval_show(idx, l)                      # arm the new lap
+                    if sector >= 1:                              # already into the new S1
+                        self._record_delta(idx, l, lap_num, 0)
+                elif lap_num != plap:
+                    self.panel_shown[idx] = False                # jumped/flashback
+            self.prev_sector[idx] = (lap_num, sector)
+
+            # Continuous hides while shown: in the pits, on an out lap, or the lap
+            # was invalidated. Sticky — stays hidden until the next lap start.
+            if self.panel_shown[idx] and lap_num == self.panel_shown_lap[idx]:
+                if (l["pit_status"] != 0
+                        or l["driver_status"] == fp.DRIVER_STATUS_OUT_LAP
+                        or l["lap_invalid"]):
+                    self.panel_shown[idx] = False
+
+            sv = self.sector_view[idx]
+            if sv is None:
+                self.sector_view[idx] = {"lap": lap_num,
+                                         "done": [sector >= 1, sector >= 2, False]}
+            elif lap_num == sv["lap"]:
+                # Still on the displayed lap: mark the sectors crossed so far.
+                if sector >= 1:
+                    sv["done"][0] = True
+                if sector >= 2:
+                    sv["done"][1] = True
+            elif lap_num == sv["lap"] + 1:
+                # The displayed lap just finished — S3 is now done. Keep showing
+                # it until S1 of the new lap is crossed, then switch to it.
+                sv["done"][2] = True
+                if sector >= 1:
+                    self.sector_view[idx] = {"lap": lap_num,
+                                             "done": [True, sector >= 2, False]}
+            else:
+                # Jumped (missed laps, or a flashback): resync to the live lap.
+                self.sector_view[idx] = {"lap": lap_num,
+                                         "done": [sector >= 1, sector >= 2, False]}
+
+    def _record_delta(self, idx, l, lap, boundary):
+        """Capture the split a car just set at a crossing, for the panel's delta
+        flash. boundary: 0=end of S1, 1=end of S2, 2=lap. We store the player's
+        cumulative time to that point; the comparison to the fastest lap happens
+        at snapshot time (the fastest lap can change between crossings). The
+        `shown` flag records whether the panel was showing at the crossing, so we
+        never flash a delta from a lap that wasn't on screen (e.g. an out lap).
+
+        For a crossing on a shown lap we also (a) extend the force-show hold so
+        its flash always completes, and (b) apply rule 4 — if the running time is
+        already >2s off the fastest lap at this point, hide the panel."""
+        if boundary == 0:
+            player_ms = l["sector1_ms"]
+        elif boundary == 1:
+            player_ms = l["sector1_ms"] + l["sector2_ms"]
+        else:
+            player_ms = l["last_lap_ms"]
+        if player_ms <= 0:
+            return
+        shown = self.panel_shown[idx]
+        self.delta_event[idx] = {"lap": lap, "boundary": boundary,
+                                 "player_ms": player_ms, "shown": shown}
+        if not shown:
+            return
+        # Rule 4 (this lap's pace) applies only at the S1/S2 crossings — when
+        # >2s off the fastest lap there, hide at once (no flash). At the line we
+        # instead let the lap-delta flash play and re-evaluate the next lap.
+        if boundary < 2:
+            holder = self._fastest_lap_holder()
+            if holder is not None:
+                target = self._cumulative(self.history[holder])[boundary]
+                if target > 0 and player_ms - target > PANEL_DELTA_HIDE_MS:
+                    self.panel_shown[idx] = False
+                    return
+        # Otherwise keep the panel alive long enough for this crossing's flash.
+        self.panel_hold_until[idx] = time.monotonic() + PANEL_FLASH_HOLD
+
+    def _eval_show(self, idx, l):
+        """At a lap start, decide whether to show the panel for the new lap:
+        not an out lap, not in the pits, lap still valid, and ERS over 50%."""
+        outlap = l["driver_status"] == fp.DRIVER_STATUS_OUT_LAP
+        self.panel_shown[idx] = (not outlap and l["pit_status"] == 0
+                                 and not l["lap_invalid"]
+                                 and self._ers_pct(idx) > ERS_SHOW_THRESHOLD)
+        self.panel_shown_lap[idx] = l["lap_num"]
+
+    def _ers_pct(self, idx):
+        st = self.status[idx]
+        return st["ers_energy_j"] / fp.ERS_MAX_J * 100.0 if st else 0.0
+
+    def _fastest_lap_holder(self):
+        """Index of the car holding the session's fastest lap, or None."""
+        holder, best = None, 0
+        for h in self.history:
+            if h and h["best_lap_time_ms"] > 0 and (best == 0 or h["best_lap_time_ms"] < best):
+                best, holder = h["best_lap_time_ms"], h["car_idx"]
+        return holder
+
+    @staticmethod
+    def _cumulative(hist):
+        """A lap's cumulative split times: (S1, S1+S2, full lap)."""
+        s1, s2, s3 = hist["best_lap_sectors_ms"]
+        return (s1, s1 + s2, s1 + s2 + s3)
+
+    def _sector_color(self, idx, i, overall_best):
+        """Colour for sector i (0-2) of a car's displayed lap: gray (not done),
+        purple (fastest of anyone), green (this driver's session best), else
+        yellow. Bests come from the game's per-sector tracking, which records
+        only valid sectors — so invalid laps never colour green/purple."""
+        sv = self.sector_view[idx]
+        if not sv or not sv["done"][i]:
+            return "gray"
+        hist = self.history[idx]
+        if not hist:
+            return "yellow"  # completed but history hasn't arrived yet
+        my_best = hist["best_sectors_ms"][i]
+        # The personal best for this sector was set on the lap we're showing ->
+        # this lap improved it (or matched the field's best).
+        if my_best > 0 and hist["best_sector_laps"][i] == sv["lap"]:
+            if overall_best[i] and my_best <= overall_best[i]:
+                return "purple"
+            return "green"
+        return "yellow"
+
+    def _sector_panel(self, active_idx, rows_by_idx):
+        """The live sector-timing block for the active/spectated driver, or None
+        when there's no such car on track. Quali-only (gated by the caller)."""
+        row = rows_by_idx.get(active_idx)
+        lap = self.lap[active_idx] if active_idx is not None else None
+        if row is None or lap is None:
+            return None
+
+        # Fastest sector of anyone in the field, per sector (the purple bar).
+        overall_best = [0, 0, 0]
+        for h in self.history:
+            if not h:
+                continue
+            for i in range(3):
+                v = h["best_sectors_ms"][i]
+                if v > 0 and (overall_best[i] == 0 or v < overall_best[i]):
+                    overall_best[i] = v
+        colours = [self._sector_color(active_idx, i, overall_best) for i in range(3)]
+
+        # Reference (right side): the session's fastest-lap holder's cumulative
+        # split at the boundary of the sector our driver is currently in, plus
+        # that holder's surname. Hidden until someone has set a lap.
+        cur_sector = lap["sector"]
+        holder = self._fastest_lap_holder()
+        reference = None
+        cumulative = None
+        if holder is not None:
+            cumulative = self._cumulative(self.history[holder])
+            href = rows_by_idx.get(holder)
+            reference = {
+                "timeMs": cumulative[min(cur_sector, 2)],
+                "name": href["code"] if href else "",
+            }
+
+        # Delta flash: the gap of the driver's latest crossing (S1/S2/lap) versus
+        # the fastest lap at the same point. The client swaps it in for the clock
+        # for ~2s. Keyed by (lap, boundary) so the client flashes each once. Only
+        # crossings made while the panel was shown flash (not e.g. an out lap).
+        delta = None
+        ev = self.delta_event[active_idx]
+        if ev and ev["shown"] and cumulative is not None:
+            target = cumulative[ev["boundary"]]
+            if target > 0:
+                delta = {
+                    "key": f"{ev['lap']}-{ev['boundary']}",
+                    "playerMs": ev["player_ms"],          # frozen time at the crossing
+                    "ms": ev["player_ms"] - target,       # gap vs the fastest lap (<0 faster)
+                }
+
+        return {
+            "position": row["position"],
+            "code": row["code"],
+            "teamColour": row["teamColour"],
+            "teamLogo": row["teamLogo"],
+            "tyre": row["tyre"],
+            "tyreColour": row["tyreColour"],
+            "currentLapMs": lap["current_lap_ms"],
+            "sectors": colours,          # ["gray"|"yellow"|"green"|"purple"] x3
+            "reference": reference,      # {timeMs, name} or None
+            "delta": delta,              # {key, ms} or None (ms<0 = faster)
+        }
 
     def snapshot(self):
         """Build the JSON-serialisable broadcast view, sorted by position."""
@@ -202,6 +435,15 @@ class GameState:
         for r in rows:
             r["fastestLap"] = r["carIndex"] == fastest_idx
 
+        # Live sector-timing block for the active driver — qualifying only, and
+        # only while the visibility rules say so (shown for this lap, or within
+        # the brief hold that lets a final delta flash finish).
+        sector_panel = None
+        if info_kind == "quali" and active_idx is not None and 0 <= active_idx < fp.NUM_CARS:
+            if self.panel_shown[active_idx] or time.monotonic() < self.panel_hold_until[active_idx]:
+                rows_by_idx = {r["carIndex"]: r for r in rows}
+                sector_panel = self._sector_panel(active_idx, rows_by_idx)
+
         return {
             "session": {
                 "brandMark": config.BRAND_MARK,
@@ -212,10 +454,10 @@ class GameState:
                 "timeLeft": self.session.get("session_time_left", 0),
                 "infoKind": info_kind,
                 "modeRotation": config.MODE_ROTATION,  # pools + auto-rotation (client-side)
-                "position": config.POSITION,           # overlay placement (client-side)
                 "flag": self._flag_state(),
             },
             "cars": rows,
+            "sectorPanel": sector_panel,   # live sector block (quali only; else None)
         }
 
 

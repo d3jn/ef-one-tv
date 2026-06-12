@@ -21,10 +21,9 @@ Keys:
                manual-cycle order) regardless of "enabled"; durations only
                matter while rotating. Valid modes: gap, interval, tyre (race),
                gap_quali (quali).
-    position   on-screen placement of overlay windows, in pixels from the
-               top-left of the 1920×1080 stage:
-               { "standings": { "x": px-from-left, "y": px-from-top } }
-               Extend with more windows later. (default x=48, y=36)
+
+Overlay placement is no longer configurable: each overlay is served on its own
+endpoint (/standings, /quali_lap_sectors) and pinned top-left in CSS.
 """
 
 import json
@@ -48,14 +47,7 @@ DEFAULTS = {
         },
         "durations": {},
     },
-    # Overlay placement, px from the stage's top-left (matches the CSS defaults).
-    "position": {
-        "standings": {"x": 48, "y": 36},
-    },
 }
-
-# Default offsets for each overlay window, used to fill gaps in user config.
-_POSITION_DEFAULTS = {"standings": {"x": 48, "y": 36}}
 
 
 def _base_dir():
@@ -104,29 +96,6 @@ def _normalize_rotation(raw):
 
 
 MODE_ROTATION = _normalize_rotation(_settings["mode_rotation"])
-
-
-def _normalize_position(raw):
-    """Coerce the position block into {window: {x, y}} with numeric coords,
-    filling any missing window/axis from _POSITION_DEFAULTS so the client always
-    gets a usable placement."""
-    raw = raw if isinstance(raw, dict) else {}
-
-    def _num(v, default):
-        # bool is an int subclass — reject it so true/false don't become 1/0.
-        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
-
-    out = {}
-    for window, default in _POSITION_DEFAULTS.items():
-        win = raw.get(window) if isinstance(raw.get(window), dict) else {}
-        out[window] = {
-            "x": _num(win.get("x"), default["x"]),
-            "y": _num(win.get("y"), default["y"]),
-        }
-    return out
-
-
-POSITION = _normalize_position(_settings["position"])
 
 
 def resolve_driver_name(name, number):

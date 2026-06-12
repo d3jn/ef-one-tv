@@ -40,8 +40,8 @@ html, body {
    thick as the blocks' border-radius. */
 #panel {
   position: absolute;
-  top: 36px;
-  left: 48px;
+  top: 0;
+  left: 0;
   width: 430px;
   display: flex;
   flex-direction: column;
@@ -249,6 +249,111 @@ html, body {
 /* Quali placeholders in the gap column ("No time" / "Out lap") — dimmed so they
    read as a state, not a value. */
 .val-note { color: var(--ink-dim); font-weight: 600; }
+
+/* --- Live sector-timing block (qualifying only) --------------------------- */
+/* Three stacked sections: a driver heading underlined by the team colour, a big
+   running lap clock with the fastest-lap reference beside it, and the three
+   sector segments coloured gray/yellow/green/purple. Positioned from config
+   (px from the stage's top-left); the default is bottom-centre. */
+#sector-panel {
+  /* Pinned flush to the top-left corner of its own stage (served standalone at
+     /quali_lap_sectors); no configurable position. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 360px;
+  background: var(--panel);
+  border-radius: 8px;
+  overflow: hidden; /* clip the team-colour underline to the rounded corners */
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  opacity: 1;
+  transition: opacity 0.35s ease; /* same fade as the standings rows */
+}
+#sector-panel.hidden { opacity: 0; }
+
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 3px solid var(--team, #888);
+}
+.sec-pos { font-size: 18px; font-weight: 800; min-width: 18px; }
+.sec-logo { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto; }
+.sec-logo.hidden, .sec-logo:not([src]), .sec-logo[src=""] { display: none; }
+.sec-name {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sec-tyre { font-size: 18px; font-weight: 800; margin-left: auto; flex: 0 0 auto; }
+
+.sec-main {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 7px 14px 9px;
+}
+/* Clock area: the running lap time, replaced for ~2s at each crossing by the
+   frozen crossing time + a coloured delta. The swap is instant (no transitions);
+   only one of the two is shown at a time via display. */
+.sec-clock { display: inline-flex; align-items: baseline; }
+.sec-time,
+#sec-delta-time,
+#sec-delta-gap {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.sec-delta { display: none; align-items: baseline; gap: 10px; white-space: nowrap; }
+/* During the flash: hide the live clock, show the frozen time + delta. */
+.sec-clock.flashing .sec-time { display: none; }
+.sec-clock.flashing .sec-delta { display: inline-flex; }
+#sec-delta-gap.faster { color: #2ecc40; }
+#sec-delta-gap.slower { color: #ffd400; }
+.sec-ref {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  line-height: 1.15;
+}
+.sec-ref.hidden { visibility: hidden; } /* keep the block's height steady */
+.sec-ref-time { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sec-ref-name { font-size: 12px; font-weight: 600; letter-spacing: 0.5px; color: var(--ink-dim); }
+
+.sec-bottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 12px 10px; }
+.seg {
+  position: relative;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding-bottom: 8px;
+}
+/* Colour-coded underline bar; both label and bar take the segment's colour. */
+.seg::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.seg.gray { color: #5b6675; }
+.seg.yellow { color: #ffd400; }
+.seg.green { color: #2ecc40; }
+.seg.purple { color: #b026ff; }
 
 /* Penalty board: a black tab that sticks out past the row's right edge, shown
    only for drivers carrying unserved penalties. Holds the accumulated time

@@ -103,9 +103,27 @@ async def ws_endpoint(ws: WebSocket):
         clients.discard(ws)
 
 
+# Overlay blocks: each name is both the route (/<name>) and the client-side
+# block id (see web/blocks/). They all serve the same generic shell, which
+# resolves the route to a block and mounts it. Add a block by adding its name
+# here and a matching web/blocks/<name>.js module.
+OVERLAY_VIEWS = ["standings", "quali_lap_sectors"]
+
+
 @app.get("/")
 async def index():
+    # Landing page linking to the overlays (each its own OBS browser source).
     return FileResponse(WEB_DIR / "index.html")
+
+
+def _make_overlay_route():
+    async def overlay():
+        return FileResponse(WEB_DIR / "overlay.html")
+    return overlay
+
+
+for _view in OVERLAY_VIEWS:
+    app.add_api_route(f"/{_view}", _make_overlay_route(), methods=["GET"])
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR), name="static")

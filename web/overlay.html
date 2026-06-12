@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ef-one-tv</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- Generic overlay shell, served at every block route (/standings,
+       /quali_lap_sectors, …). main.js resolves the route to a block and injects
+       that block's markup into #stage. Design surface is a fixed 1920×1080 so it
+       drops straight into OBS as a browser source over gameplay capture. -->
+  <div id="stage"></div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
