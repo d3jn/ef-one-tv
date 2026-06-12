@@ -132,7 +132,7 @@ async def ws_endpoint(ws: WebSocket):
 # block id (see web/blocks/). They all serve the same generic shell, which
 # resolves the route to a block and mounts it. Add a block by adding its name
 # here and a matching web/blocks/<name>.js module.
-OVERLAY_VIEWS = ["standings", "quali_lap_sectors"]
+OVERLAY_VIEWS = ["standings", "quali_lap_sectors", "inputs"]
 
 
 @app.get("/")

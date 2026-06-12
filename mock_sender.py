@@ -9,6 +9,7 @@ Pick the session with --mode:        python mock_sender.py --mode quali
 
 import argparse
 import math
+import random
 import socket
 import struct
 import time
@@ -228,14 +229,55 @@ def lap_packet(frame, t, quali=False):
     return header(fp.PACKET_LAP, frame) + body
 
 
+# --- Pedal-input demo (the active car, index 0) -----------------------------
+# Simulate a driver alternating pedals so the /inputs trace has something to
+# show: press the throttle to a random level, hold it for a few seconds, lift
+# off, then press the brake to a (different) random level, hold, lift off, and
+# repeat. Each press/lift takes a ~1s ramp rather than snapping, and one pedal is
+# fully released before the other goes down.
+PEDAL_RAMP_S = 1.0     # transition time to press / release a pedal
+PEDAL_HOLD_S = 3.0     # how long a pedal is held at its random level
+PEDAL_PHASE_S = 2 * PEDAL_RAMP_S + PEDAL_HOLD_S   # one pedal: ramp up, hold, ramp down
+PEDAL_CYCLE_S = 2 * PEDAL_PHASE_S                 # throttle phase, then brake phase
+
+
+def _pedal_target(kind, idx):
+    """Stable random level (0..1, i.e. 0–100%) for the `idx`-th press of `kind`
+    ("t"/"b"). Seeded by the segment so it's constant for a whole hold (no
+    per-tick flicker) yet differs each time the pedal is pressed."""
+    return random.Random(f"pedal-{kind}-{idx}").random()
+
+
+def _ramp_hold(x, target):
+    """Trapezoid level over one PEDAL_PHASE_S window: ramp 0->target over RAMP,
+    hold at target, then ramp back to 0 over the final RAMP."""
+    if x < PEDAL_RAMP_S:
+        return target * (x / PEDAL_RAMP_S)            # pressing down
+    if x < PEDAL_RAMP_S + PEDAL_HOLD_S:
+        return target                                 # held
+    down = x - (PEDAL_RAMP_S + PEDAL_HOLD_S)
+    return target * max(0.0, 1.0 - down / PEDAL_RAMP_S)  # lifting off
+
+
+def pedal_inputs(t):
+    """(throttle, brake) in 0..1 for the simulated driver at time t."""
+    cycle = int(t // PEDAL_CYCLE_S)
+    local = t % PEDAL_CYCLE_S
+    if local < PEDAL_PHASE_S:                          # throttle half of the cycle
+        return _ramp_hold(local, _pedal_target("t", cycle)), 0.0
+    return 0.0, _ramp_hold(local - PEDAL_PHASE_S, _pedal_target("b", cycle))
+
+
 def telemetry_packet(frame, t):
     body = b""
+    throttle0, brake0 = pedal_inputs(t)   # the active car (index 0) alternates pedals
     for i in range(fp.NUM_CARS):
         speed = 280 + int(math.sin(t * 2 + i) * 40) if i < NUM_ACTIVE else 0
         drs = 1 if (i < NUM_ACTIVE and math.sin(t + i) > 0.5) else 0
+        throttle, brake = (throttle0, brake0) if i == 0 else (1.0, 0.0)
         body += struct.pack(
             fp.CAR_TELEMETRY_FMT,
-            speed, 1.0, 0.0, 0.0, 0, 7, 11000, drs, 80, 0,
+            speed, throttle, 0.0, brake, 0, 7, 11000, drs, 80, 0,
             *([0] * 4), *([90] * 4), *([95] * 4), 100,
             *([23.0] * 4), *([0] * 4),
         )
@@ -250,13 +292,39 @@ def status_packet(frame, t):
         visual = compounds[i % 3] if i < NUM_ACTIVE else 0
         age = (int(t) // 3 + i) % 25 if i < NUM_ACTIVE else 0
         ers = PLAYER_ERS_J if i == 0 else 2_000_000.0  # player has enough to show
+        # Active car (0): cycle the ERS mode through none/medium/hotlap/overtake
+        # and drift the brake bias, so the /inputs pills visibly change.
+        if i == 0:
+            ers_mode = int(t // 4) % 4
+            brake_bias = int(54 + math.sin(t * 0.15) * 4)   # ~50–58 %, live
+        else:
+            ers_mode, brake_bias = 1, 50
         body += struct.pack(
             fp.CAR_STATUS_FMT,
-            2, 1, 1, 50, 0, 100.0, 110.0, 18.0, 13000, 4000,
+            2, 1, 1, brake_bias, 0, 100.0, 110.0, 18.0, 13000, 4000,
             8, 1, 0, visual, visual, age, 0,
-            0.0, 0.0, ers, 1, 0.0, 0.0, 0.0, 0,
+            0.0, 0.0, ers, ers_mode, 0.0, 0.0, 0.0, 0,
         )
     return header(fp.PACKET_CAR_STATUS, frame) + body
+
+
+def setups_packet(frame, t):
+    body = b""
+    for i in range(fp.NUM_CARS):
+        # Active car (0) drifts its on-throttle differential so the DIFF pill
+        # moves; everyone else sits fully locked.
+        on_throttle = int(85 + math.sin(t * 0.1) * 15) if i == 0 else 100
+        body += struct.pack(
+            fp.CAR_SETUP_FMT,
+            20, 25, on_throttle, 50,           # frontWing, rearWing, onThrottle, offThrottle
+            0.0, 0.0, 0.0, 0.0,                # cambers, toes
+            5, 5, 5, 5, 3, 3, 100, 54, 50,     # susp/ARB/heights, brakePressure, brakeBias, engineBraking
+            23.0, 23.0, 23.0, 23.0,            # tyre pressures
+            0,                                 # ballast
+            100.0,                             # fuelLoad
+        )
+    body += struct.pack("<f", 0.0)             # m_nextFrontWingValue (player only)
+    return header(fp.PACKET_CAR_SETUPS, frame) + body
 
 
 def _lap_entry(lap_time, sectors, valid=0x0F):
@@ -333,6 +401,7 @@ def main(session_type=SESSION_MODES["race"]):
         if frame % 20 == 1:
             sock.sendto(participants_packet(frame), (HOST, PORT))
             sock.sendto(session_packet(frame, session_type, yellow, safety_car), (HOST, PORT))
+            sock.sendto(setups_packet(frame, t), (HOST, PORT))
         sock.sendto(lap_packet(frame, t, quali), (HOST, PORT))
         sock.sendto(telemetry_packet(frame, t), (HOST, PORT))
         sock.sendto(status_packet(frame, t), (HOST, PORT))

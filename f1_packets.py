@@ -33,6 +33,11 @@ LAP_DATA_SIZE = struct.calcsize(LAP_DATA_FMT)  # 57
 CAR_STATUS_FMT = "<BBBBBfffHHBBHBBBbfffBfffB"
 CAR_STATUS_SIZE = struct.calcsize(CAR_STATUS_FMT)  # 55
 
+# Car Setup: see spec lines 448-473. 50 bytes per car. We only read m_onThrottle
+# (index 2) and m_brakeBias (index 15); the rest is aero/suspension/tyre setup.
+CAR_SETUP_FMT = "<4B4f9B4fBf"
+CAR_SETUP_SIZE = struct.calcsize(CAR_SETUP_FMT)  # 50
+
 # Participants: 7 uint8 + 32s name + 2 uint8 + uint16 + 2 uint8 + 12 uint8.
 PARTICIPANT_DATA_FMT = "<7B32s2BH2B12B"
 PARTICIPANT_DATA_SIZE = struct.calcsize(PARTICIPANT_DATA_FMT)  # 57
@@ -66,6 +71,7 @@ PACKET_SESSION = 1
 PACKET_LAP = 2
 PACKET_EVENT = 3
 PACKET_PARTICIPANTS = 4
+PACKET_CAR_SETUPS = 5
 PACKET_CAR_TELEMETRY = 6
 PACKET_CAR_STATUS = 7
 PACKET_SESSION_HISTORY = 11
@@ -209,6 +215,8 @@ def parse_car_telemetry(data):
         t = struct.unpack_from(CAR_TELEMETRY_FMT, data, offset)
         out.append({
             "speed": t[0],
+            "throttle": t[1],  # 0.0..1.0
+            "brake": t[3],     # 0.0..1.0
             "gear": t[5],
             "rpm": t[6],
             "drs": t[7],  # 0 = off, 1 = on
@@ -252,13 +260,28 @@ def parse_car_status(data):
     for _ in range(NUM_CARS):
         s = struct.unpack_from(CAR_STATUS_FMT, data, offset)
         out.append({
+            "front_brake_bias": s[3],     # live brake bias % (front), MFD-adjustable
             "fuel_in_tank": s[5],
             "drs_allowed": s[11],
             "visual_tyre": s[14],
             "tyre_age_laps": s[15],
             "ers_energy_j": s[19],        # ERS store in Joules (max ERS_MAX_J)
+            "ers_deploy_mode": s[20],     # 0 none, 1 medium, 2 hotlap, 3 overtake
         })
         offset += CAR_STATUS_SIZE
+    return out
+
+
+def parse_car_setups(data):
+    out = []
+    offset = HEADER_SIZE
+    for _ in range(NUM_CARS):
+        s = struct.unpack_from(CAR_SETUP_FMT, data, offset)
+        out.append({
+            "on_throttle_diff": s[2],     # on-throttle differential % (100 = locked)
+            "brake_bias": s[15],          # setup brake bias % (front)
+        })
+        offset += CAR_SETUP_SIZE
     return out
 
 

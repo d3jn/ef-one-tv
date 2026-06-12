@@ -4,3 +4,4 @@
 
 import "./standings.js";
 import "./sectors.js";
+import "./inputs.js";

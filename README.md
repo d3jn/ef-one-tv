@@ -60,6 +60,7 @@ scales to fit); the background is transparent and each block is pinned top-left.
 |-------|--------------------|-------|
 | `/standings` | **660 × 960** | The timing tower (incl. the session-flag tab and penalty/finish tabs that extend right of it; height covers the 22-car maximum). |
 | `/quali_lap_sectors` | **376 × 132** | The live qualifying lap-sector block for the active driver. |
+| `/inputs` | **480 × 150** | A scrolling throttle (green) / brake (red) trace for the active driver (~5s window), with a status-pill row: RPM, ERS mode, brake bias, on-throttle diff. |
 
 <http://localhost:5000> is a landing page linking to both.
 

@@ -274,6 +274,57 @@ html, body {
 }
 #sector-panel.hidden { opacity: 0; }
 
+/* Inputs trace (throttle/brake) — served standalone at /inputs. Pinned flush to
+   the top-left of its own stage, like the other blocks. 10px padding frames the
+   460×100 canvas inside the 480×120 footprint. */
+#inputs-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 10px;
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  /* NO backdrop-filter here (unlike the static panels): the canvas repaints
+     continuously, so a blurred backdrop would be re-rasterized every frame —
+     on the CPU under OBS's GPU-less CEF — and pegs a core. The opaque-ish
+     --panel fill reads fine over gameplay without it. */
+  line-height: 0; /* no descender gap under the inline canvas */
+}
+#inputs-canvas {
+  display: block;
+  /* Own compositing layer so the live canvas repaints don't invalidate the
+     panel's background/shadow raster behind it. */
+  will-change: transform;
+}
+
+/* Status pills above the trace. line-height: normal undoes the panel's
+   line-height: 0 (which only exists to kill the canvas descender gap). */
+.inputs-pills {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  line-height: normal;
+}
+.pill {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;                       /* every pill is white text on a dark fill */
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums; /* steady width as RPM/% change */
+}
+.pill-rpm  { background: #15457e; margin-left: auto; }  /* blue; pushed to the right edge */
+.pill-bb   { background: #4a2a7a; }  /* violet */
+.pill-diff { background: #5c3a1e; }  /* brown */
+/* ERS deploy mode — darkened so white text stays legible. */
+.pill-ers.ers-none     { background: #464b54; }  /* gray */
+.pill-ers.ers-medium   { background: #a8870c; }  /* dark yellow */
+.pill-ers.ers-hotlap   { background: #b5560a; }  /* dark orange */
+.pill-ers.ers-overtake { background: #9a1f1f; }  /* dark red */
+
 .sec-head {
   display: flex;
   align-items: center;

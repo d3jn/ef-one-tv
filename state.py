@@ -54,6 +54,7 @@ class GameState:
         self.lap = [None] * fp.NUM_CARS
         self.telemetry = [None] * fp.NUM_CARS
         self.status = [None] * fp.NUM_CARS
+        self.setups = [None] * fp.NUM_CARS
         self.history = [None] * fp.NUM_CARS  # session-history (per car), for best-lap tyre
         # Which sectors of the lap currently shown in the sector panel are done,
         # per car: {"lap": int, "done": [s1, s2, s3]}. Advanced from live lap
@@ -93,6 +94,8 @@ class GameState:
                 self.telemetry = fp.parse_car_telemetry(data)
             elif pid == fp.PACKET_CAR_STATUS:
                 self.status = fp.parse_car_status(data)
+            elif pid == fp.PACKET_CAR_SETUPS:
+                self.setups = fp.parse_car_setups(data)
             elif pid == fp.PACKET_SESSION_HISTORY:
                 hist = fp.parse_session_history(data)  # one car per packet
                 self.history[hist["car_idx"]] = hist
@@ -444,6 +447,23 @@ class GameState:
                 rows_by_idx = {r["carIndex"]: r for r in rows}
                 sector_panel = self._sector_panel(active_idx, rows_by_idx)
 
+        # Live throttle/brake of the active/spectated car (0..1), for the inputs
+        # trace overlay. None when there's no such car (the block then draws flat).
+        inputs = None
+        if active_idx is not None and 0 <= active_idx < fp.NUM_CARS:
+            tele = self.telemetry[active_idx]
+            if tele:
+                stat = self.status[active_idx] or {}
+                setup = self.setups[active_idx] or {}
+                inputs = {
+                    "throttle": tele.get("throttle", 0.0),
+                    "brake": tele.get("brake", 0.0),
+                    "rpm": tele.get("rpm", 0),
+                    "ersMode": stat.get("ers_deploy_mode", 0),     # 0..3
+                    "brakeBias": stat.get("front_brake_bias", 0),  # % (front)
+                    "diff": setup.get("on_throttle_diff", 0),      # % on-throttle
+                }
+
         return {
             "session": {
                 "brandMark": config.BRAND_MARK,
@@ -458,6 +478,7 @@ class GameState:
             },
             "cars": rows,
             "sectorPanel": sector_panel,   # live sector block (quali only; else None)
+            "inputs": inputs,              # {throttle, brake} of the active car, or None
         }
 
 
