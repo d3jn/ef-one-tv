@@ -17,6 +17,9 @@ ERS_SHOW_THRESHOLD = 50.0     # % battery required at lap start to show the pane
 PANEL_DELTA_HIDE_MS = 2000    # hide if a crossing is >2s slower than the fastest lap
 PANEL_FLASH_HOLD = 2.2        # s to keep the panel alive after a shown lap's last
                               # crossing, so the delta flash (2s) always completes
+SECTOR_RESET_HOLD = 2.5       # s to hold a finished lap's coloured sectors before
+                              # resetting them to gray for the new lap (which then
+                              # lights its sectors only as they're crossed)
 
 
 def _fmt_lap_time(ms):
@@ -60,6 +63,9 @@ class GameState:
         # per car: {"lap": int, "done": [s1, s2, s3]}. Advanced from live lap
         # data (see _update_sector_view) so S3 can light at the line.
         self.sector_view = [None] * fp.NUM_CARS
+        # Per-car monotonic deadline to hold a just-finished lap's coloured
+        # sectors before the panel resets to gray for the new lap. 0 = no hold.
+        self.sector_hold_until = [0.0] * fp.NUM_CARS
         # Per-car (lap, sector) last seen, to detect S1/S2/line crossings, and
         # the most recent crossing's split (for the panel's delta flash).
         self.prev_sector = [None] * fp.NUM_CARS
@@ -137,6 +143,7 @@ class GameState:
                 self.prev_sector[idx] = None
                 self.panel_shown[idx] = False
                 self.panel_hold_until[idx] = 0.0
+                self.sector_hold_until[idx] = 0.0
                 continue
             lap_num, sector = l["lap_num"], l["sector"]  # sector: 0=S1, 1=S2, 2=S3
 
@@ -167,6 +174,7 @@ class GameState:
                         or l["lap_invalid"]):
                     self.panel_shown[idx] = False
 
+            now = time.monotonic()
             sv = self.sector_view[idx]
             if sv is None:
                 self.sector_view[idx] = {"lap": lap_num,
@@ -178,16 +186,22 @@ class GameState:
                 if sector >= 2:
                     sv["done"][1] = True
             elif lap_num == sv["lap"] + 1:
-                # The displayed lap just finished — S3 is now done. Keep showing
-                # it until S1 of the new lap is crossed, then switch to it.
+                # The displayed lap just finished — light S3, then hold the full
+                # coloured row for SECTOR_RESET_HOLD seconds (broadcast-style). On
+                # expiry, switch to the new lap reset to gray, so its sectors light
+                # only as they're crossed (not for the whole first sector as before).
                 sv["done"][2] = True
-                if sector >= 1:
+                if self.sector_hold_until[idx] == 0.0:
+                    self.sector_hold_until[idx] = now + SECTOR_RESET_HOLD
+                if now >= self.sector_hold_until[idx]:
                     self.sector_view[idx] = {"lap": lap_num,
-                                             "done": [True, sector >= 2, False]}
+                                             "done": [sector >= 1, sector >= 2, False]}
+                    self.sector_hold_until[idx] = 0.0
             else:
                 # Jumped (missed laps, or a flashback): resync to the live lap.
                 self.sector_view[idx] = {"lap": lap_num,
                                          "done": [sector >= 1, sector >= 2, False]}
+                self.sector_hold_until[idx] = 0.0
 
     def _record_delta(self, idx, l, lap, boundary):
         """Capture the split a car just set at a crossing, for the panel's delta

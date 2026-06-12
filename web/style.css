@@ -59,8 +59,10 @@ html, body {
   height: 52px;
   background: var(--panel);
   border-radius: 8px;
-  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(8px);
+  /* No backdrop-filter: blurring the backdrop is re-rasterized on every repaint
+     (CPU-side in OBS's GPU-less CEF). The translucent --panel fill carries the
+     look on its own. Shadow kept small-radius so it's cheap to paint. */
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 
 /* Session-flag tab: extends the header to the right. Slides in left→right when
@@ -80,7 +82,7 @@ html, body {
   font-weight: 800;
   letter-spacing: 1.5px;
   white-space: nowrap;
-  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   transform: translateX(-20px); /* hidden: tucked left + faded */
   opacity: 0;
   pointer-events: none;
@@ -123,8 +125,9 @@ html, body {
   border-radius: 8px;
   /* overflow stays visible so penalty boards can stick out past the right
      edge; the rounded corners are instead applied to the top/bottom rows. */
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
+  /* No backdrop-filter (see #topbar): too costly to re-rasterize as the tower
+     repaints. Small-radius shadow for cheap depth. */
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);
 }
 
 #tower-rows { list-style: none; }
@@ -267,8 +270,10 @@ html, body {
   background: var(--panel);
   border-radius: 8px;
   overflow: hidden; /* clip the team-colour underline to the rounded corners */
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
+  /* No backdrop-filter: the live lap clock repaints this panel every tick, so a
+     blurred backdrop would be re-rasterized 20×/s (CPU-side under OBS's CEF).
+     Small-radius shadow keeps depth cheaply. */
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);
   opacity: 1;
   transition: opacity 0.35s ease; /* same fade as the standings rows */
 }
@@ -284,8 +289,8 @@ html, body {
   padding: 10px;
   background: var(--panel);
   border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  /* NO backdrop-filter here (unlike the static panels): the canvas repaints
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);  /* small-radius: cheap to paint */
+  /* NO backdrop-filter here (like the other panels): the canvas repaints
      continuously, so a blurred backdrop would be re-rasterized every frame —
      on the CPU under OBS's GPU-less CEF — and pegs a core. The opaque-ish
      --panel fill reads fine over gameplay without it. */

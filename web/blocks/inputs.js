@@ -56,6 +56,17 @@ let lastTs = 0;
 let acc = 0;        // time accumulator for fixed-step buffer advance
 let drawAcc = 0;    // time accumulator for the redraw cap
 
+// Linear interpolation between successive snapshots: snapshots arrive ~5x slower
+// than columns advance, so writing each snapshot value verbatim repeats ~5
+// identical columns and stair-steps the trace. Instead we ramp the written value
+// straight from the previous sample to the latest over the columns that span the
+// interval — so the line angles from one point to the next. segLen (columns per
+// interval) is re-estimated from the last interval, so this tracks any push_hz.
+let curT = 0, curB = 0;        // value currently written into the buffer
+let segFromT = 0, segFromB = 0; // sample value at the start of the current segment
+let segCols = 0;               // columns pushed since the last snapshot
+let segLen = 5;                // estimated columns per snapshot interval
+
 function init() {
   canvas = document.getElementById("inputs-canvas");
   const dpr = window.devicePixelRatio || 1;
@@ -72,6 +83,13 @@ function init() {
 // owns the smooth scroll), and refresh the status pills (cheap, 4 text nodes).
 function render(state) {
   const inp = state.inputs;
+  // Begin a new interpolation segment from wherever the trace is now toward the
+  // freshly-arrived sample. The previous segment's column count estimates this
+  // one's length, so the line reaches each sample just as the next arrives.
+  if (segCols > 0) segLen = segCols;
+  segFromT = curT;
+  segFromB = curB;
+  segCols = 0;
   latest = inp || { throttle: 0, brake: 0 };
   updatePills(inp);
 }
@@ -102,8 +120,13 @@ function frame(ts) {
   let steps = Math.min(Math.floor(acc / STEP_MS), CW);
   acc -= steps * STEP_MS;
   while (steps-- > 0) {
+    // Advance along the straight line from the previous sample to the latest.
+    segCols++;
+    const f = Math.min(1, segCols / segLen);
+    curT = segFromT + ((latest.throttle || 0) - segFromT) * f;
+    curB = segFromB + ((latest.brake || 0) - segFromB) * f;
     cols.shift();
-    cols.push({ t: latest.throttle || 0, b: latest.brake || 0 });
+    cols.push({ t: curT, b: curB });
   }
   // Paint at DRAW_HZ, not the full rAF rate: the buffer scroll above is driven
   // by its own clock, so a lower paint rate costs CPU without changing motion.
