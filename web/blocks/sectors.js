@@ -99,4 +99,8 @@ function render(state) {
   renderSectorPanel(state.sectorPanel);
 }
 
-registerBlock({ name: "quali_lap_sectors", template: TEMPLATE, render });
+// Design footprint (px) the OBS browser source should match: the 360-wide panel
+// (~117 tall) plus a little allowance.
+const SIZE = { w: 376, h: 132 };
+
+registerBlock({ name: "quali_lap_sectors", template: TEMPLATE, size: SIZE, render });

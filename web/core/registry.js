@@ -6,6 +6,8 @@
  *   {
  *     name:     "standings",          // matches the URL path / HUD_VIEW
  *     template: "<div id=…>…</div>",  // markup injected into #stage on mount
+ *     size:     { w, h },             // design footprint (px); the stage is sized
+ *                                     //   to it so an OBS source can match it
  *     init?:    () => void,           // one-time setup after the template is in the DOM
  *     render:   (state) => void,      // called with each broadcast snapshot
  *   }

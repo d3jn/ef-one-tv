@@ -27,10 +27,10 @@ const block = getBlock(view);
 if (!block) {
   console.error(`unknown overlay "${view}"; known: ${blockNames().join(", ")}`);
 } else {
-  // Mount: inject the block's template, run its one-time setup, then start
-  // feeding it snapshots.
+  // Mount: size the stage to the block's footprint, inject the block's template,
+  // run its one-time setup, then start feeding it snapshots.
   document.getElementById("stage").insertAdjacentHTML("beforeend", block.template);
   block.init?.();
-  mountStage();
+  mountStage(block.size || { w: 1920, h: 1080 });
   startFeed((state) => block.render(state));
 }

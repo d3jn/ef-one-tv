@@ -474,4 +474,10 @@ function init() {
   applyMode(modeFromHash());
 }
 
-registerBlock({ name: "standings", template: TEMPLATE, init, render });
+// Design footprint (px) the OBS browser source should match. Width clears the
+// session-flag tab that extends right of the header (~626 px with the widest
+// "YELLOW FLAG" text); height covers the 22-car maximum (52 header + 8 gap +
+// 22×40 rows = 940), each with a little allowance.
+const SIZE = { w: 660, h: 960 };
+
+registerBlock({ name: "standings", template: TEMPLATE, size: SIZE, init, render });

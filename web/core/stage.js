@@ -1,14 +1,18 @@
-/* Stage scaling: the whole overlay lives on a fixed 1920×1080 #stage so the
- * layout is resolution-independent and OBS-ready. fitStage scales that surface
- * to fit the current window. mountStage wires it to the resize event and runs it
- * once. */
+/* Stage scaling: the overlay lives on a fixed design surface (#stage) sized to
+ * the active block's footprint, so an OBS browser source can be made just big
+ * enough for the block instead of a full 1920×1080. mountStage fixes the stage
+ * to the block's design size and scales it to fit the current window (preserving
+ * aspect), so any source resolution with that aspect renders the block crisp. */
 
-export function fitStage() {
-  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  document.getElementById("stage").style.setProperty("--scale", scale);
-}
+export function mountStage(size) {
+  const stage = document.getElementById("stage");
+  stage.style.width = `${size.w}px`;
+  stage.style.height = `${size.h}px`;
 
-export function mountStage() {
-  window.addEventListener("resize", fitStage);
-  fitStage();
+  const fit = () => {
+    const scale = Math.min(window.innerWidth / size.w, window.innerHeight / size.h);
+    stage.style.setProperty("--scale", scale);
+  };
+  window.addEventListener("resize", fit);
+  fit();
 }

@@ -49,6 +49,20 @@ In F1 25: **Settings → Telemetry Settings**
 - UDP Send Rate: 20–60 Hz
 - UDP Format: **2025**
 
+## Overlays (OBS browser sources)
+
+Each overlay is served on its own route and sized to just its own block, so you
+can add them to **OBS** as separate Browser Sources without a full-screen canvas.
+Set each source to the size below (or any size with the same aspect — the block
+scales to fit); the background is transparent and each block is pinned top-left.
+
+| Route | Browser source size | Shows |
+|-------|--------------------|-------|
+| `/standings` | **660 × 960** | The timing tower (incl. the session-flag tab and penalty/finish tabs that extend right of it; height covers the 22-car maximum). |
+| `/quali_lap_sectors` | **376 × 132** | The live qualifying lap-sector block for the active driver. |
+
+<http://localhost:5000> is a landing page linking to both.
+
 ## Settings
 
 Ports and rates live in **`settings.json`** next to the code (loaded by
@@ -90,8 +104,9 @@ they always agree.
 
 ## Notes & next steps
 
-- The page is a fixed **1920×1080** surface on a transparent background, so it
-  drops straight into **OBS** as a Browser Source over gameplay capture.
+- Each overlay is a transparent surface sized to its own block (see
+  [Overlays](#overlays-obs-browser-sources)), so it drops straight into **OBS**
+  as a Browser Source over gameplay capture.
 - The server pushes snapshots at a fixed **20 Hz** (`PUSH_HZ` in `server.py`),
   decoupled from the much faster packet rate, so the browser is never flooded.
 - Ports: `UDP_PORT` and `HTTP_PORT` are constants at the top of `server.py`.
