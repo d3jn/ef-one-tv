@@ -21,6 +21,11 @@ Keys:
                manual-cycle order) regardless of "enabled"; durations only
                matter while rotating. Valid modes: gap, interval, tyre (race),
                gap_quali (quali).
+    retransmit_to  list of "host:port" strings to mirror raw incoming telemetry
+               to (default []). Every UDP datagram is forwarded verbatim, as it
+               arrives — unthrottled, independent of push_hz — so another tool
+               on the network can read the same feed. IPv4 host:port; malformed
+               entries are skipped with a warning.
 
 Overlay placement is no longer configurable: each overlay is served on its own
 endpoint (/standings, /quali_lap_sectors) and pinned top-left in CSS.
@@ -47,6 +52,9 @@ DEFAULTS = {
         },
         "durations": {},
     },
+    # No rebroadcasting by default. Each entry is an "host:port" UDP destination
+    # to mirror raw incoming telemetry to.
+    "retransmit_to": [],
 }
 
 
@@ -96,6 +104,31 @@ def _normalize_rotation(raw):
 
 
 MODE_ROTATION = _normalize_rotation(_settings["mode_rotation"])
+
+
+def _normalize_retransmit(raw):
+    """Parse the retransmit_to list of "host:port" strings into (host, port)
+    tuples for socket.sendto. Non-strings and malformed entries (missing colon,
+    empty host, non-numeric/out-of-range port) are skipped with a warning so one
+    typo can't sink startup. Bracketed IPv6 ("[::1]:20777") parses too, though
+    the forwarding socket is IPv4."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        host, sep, port = (item.rpartition(":") if isinstance(item, str) else ("", "", ""))
+        host = host.strip().strip("[]")
+        if sep and host and port.isdigit() and 0 < int(port) <= 65535:
+            out.append((host, int(port)))
+        else:
+            sys.stderr.write(
+                f"settings.json: ignoring retransmit_to entry {item!r} "
+                f"(want \"host:port\")\n"
+            )
+    return out
+
+
+RETRANSMIT_TO = _normalize_retransmit(_settings["retransmit_to"])
 
 
 def resolve_driver_name(name, number):

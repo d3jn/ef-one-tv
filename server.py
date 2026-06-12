@@ -29,17 +29,28 @@ UDP_PORT = config.UDP_PORT      # F1 25 telemetry port to listen on
 HTTP_HOST = config.HTTP_HOST    # interface the page binds to
 HTTP_PORT = config.HTTP_PORT    # http://localhost:<HTTP_PORT>
 PUSH_HZ = config.PUSH_HZ        # snapshots/sec pushed to the browser
+RETRANSMIT_TO = config.RETRANSMIT_TO  # [(host, port), …] to mirror raw packets to
 
 WEB_DIR = Path(__file__).parent / "web"
 
 game = GameState()
 clients: set[WebSocket] = set()
+forward_sock: socket.socket | None = None  # set in lifespan when retransmitting
 
 
 class TelemetryProtocol(asyncio.DatagramProtocol):
-    """Folds each inbound UDP datagram into the shared GameState."""
+    """Folds each inbound UDP datagram into the shared GameState, and — when
+    retransmit_to is configured — mirrors the raw datagram on to each
+    destination, verbatim and unthrottled (no push_hz gating)."""
 
     def datagram_received(self, data, addr):
+        # Mirror first so a parser hiccup can't stop the passthrough.
+        if forward_sock is not None:
+            for dest in RETRANSMIT_TO:
+                try:
+                    forward_sock.sendto(data, dest)
+                except OSError:
+                    pass  # a dead/unreachable destination must never stall ingest
         game.update(data)
 
     def error_received(self, exc):
@@ -64,6 +75,7 @@ async def broadcaster():
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    global forward_sock
     loop = asyncio.get_running_loop()
     # SO_REUSEADDR + a generous receive buffer so we don't drop packets.
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -74,14 +86,25 @@ async def lifespan(app: FastAPI):
     transport, _ = await loop.create_datagram_endpoint(
         TelemetryProtocol, sock=sock
     )
+    # One non-blocking sender for all retransmit destinations: fire-and-forget so
+    # a slow/dead target can never back up the ingest path.
+    if RETRANSMIT_TO:
+        forward_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        forward_sock.setblocking(False)
     task = asyncio.create_task(broadcaster())
     print(f"Listening for F1 25 telemetry on UDP {UDP_PORT}")
     print(f"Open the graphics at http://{HTTP_HOST}:{HTTP_PORT}")
+    if RETRANSMIT_TO:
+        print("Retransmitting raw telemetry to "
+              + ", ".join(f"{h}:{p}" for h, p in RETRANSMIT_TO))
     try:
         yield
     finally:
         task.cancel()
         transport.close()
+        if forward_sock is not None:
+            forward_sock.close()
+            forward_sock = None
 
 
 app = FastAPI(lifespan=lifespan)

@@ -20,5 +20,6 @@
       "interval": 5,
       "tyre": 5
     }
-  }
+  },
+  "retransmit_to": []
 }
