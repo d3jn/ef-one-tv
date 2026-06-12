@@ -11,8 +11,6 @@ Keys:
     http_port  port the graphics page is served on       (default 5000)
     push_hz    snapshots/sec pushed to the browser       (default 20)
     brand_mark text shown in the red header badge         (default "F1")
-    driver_name_overrides  list of {source_name, source_number, target_name}
-               objects used to swap displayed driver names (default [])
     mode_rotation  standings-mode pools + auto-rotation, passed to the browser:
                { "enabled": bool,                       # auto-advance on/off
                  "pools":     { "race"|"quali"|"other": [mode, …] },  # ordered
@@ -26,6 +24,10 @@ Keys:
                arrives — unthrottled, independent of push_hz — so another tool
                on the network can read the same feed. IPv4 host:port; malformed
                entries are skipped with a warning.
+
+Driver name overrides live in their own file, driver_names.json (next to
+settings.json): a list of {source_name, source_number, target_name} objects used
+to swap displayed driver names. A missing file means no overrides.
 
 Overlay placement is no longer configurable: each overlay is served on its own
 endpoint (/standings, /quali_lap_sectors) and pinned top-left in CSS.
@@ -41,7 +43,6 @@ DEFAULTS = {
     "http_port": 5000,
     "push_hz": 20,
     "brand_mark": "F1",
-    "driver_name_overrides": [],
     # Off by default: same pools as the built-in client fallback, no rotation.
     "mode_rotation": {
         "enabled": False,
@@ -80,13 +81,30 @@ def load():
     return settings
 
 
+def load_driver_names():
+    """Load driver name overrides from driver_names.json (next to settings.json):
+    a list of {source_name, source_number, target_name} objects. A missing file
+    means no overrides; invalid JSON / read errors are fatal, matching load()."""
+    path = os.path.join(_base_dir(), "driver_names.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return []  # no overrides is fine when there's no file
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"driver_names.json: invalid JSON ({e})")
+    except OSError as e:
+        raise SystemExit(f"driver_names.json: read failed ({e})")
+    return data if isinstance(data, list) else []
+
+
 _settings = load()
 UDP_PORT = int(_settings["udp_port"])
 HTTP_HOST = str(_settings["http_host"])
 HTTP_PORT = int(_settings["http_port"])
 PUSH_HZ = int(_settings["push_hz"])
 BRAND_MARK = str(_settings["brand_mark"])
-DRIVER_NAME_OVERRIDES = _settings["driver_name_overrides"] or []
+DRIVER_NAME_OVERRIDES = load_driver_names()
 
 
 def _normalize_rotation(raw):

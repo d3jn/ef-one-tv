@@ -4,10 +4,6 @@
   "http_port": 5000,
   "push_hz": 20,
   "brand_mark": "F1",
-  "driver_name_overrides": [
-    { "source_name": "lando_gamer", "source_number": 4, "target_name": "LANDO" },
-    { "source_name": "", "source_number": 16, "target_name": "CHARLES" }
-  ],
   "mode_rotation": {
     "enabled": true,
     "pools": {

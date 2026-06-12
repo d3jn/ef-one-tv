@@ -84,6 +84,7 @@ they always agree.
 | `mock_sender.py` | Emits fake F1 25 packets for offline testing. |
 | `config.py` | Loads `settings.json` (shared by server + mock sender). |
 | `settings.json` | Ports and push rate. |
+| `driver_names.json` | Driver name overrides (source name/number → display name). |
 | `web/` | The broadcast graphics (HTML/CSS/JS). |
 | `specs/` | Official F1 25 UDP structure reference. |
 
