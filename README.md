@@ -39,6 +39,24 @@ python mock_sender.py
 You should see a 20-car timing tower that races, swaps positions (with smooth
 sliding rows), pits, and toggles DRS.
 
+### Record a real session and replay it
+
+To debug against real telemetry without the game running, capture a session once
+and replay it as many times as you like.
+
+```bash
+# 1. Capture: point the game at this machine and drive. Writes a new file under
+#    recordings/ named <YYYY-MM-DD>-<n>.f1rec (n auto-increments per day).
+python recorder.py            # Ctrl+C to stop
+
+# 2. Replay any capture into the server, looping forever, with the original
+#    packet timing preserved. Ignores --mode and the synthetic data.
+python mock_sender.py --from-file recordings/2026-06-13-1.f1rec
+```
+
+A `.f1rec` file is just length-prefixed, timestamped raw datagrams, so replay is
+byte-for-byte what the game sent — ideal for reproducing session-specific issues.
+
 ### With the real game
 
 In F1 25: **Settings → Telemetry Settings**
@@ -129,7 +147,8 @@ copy next to the exe and falls back to the embedded one.
 | `f1_packets.py` | Packet parsers + reference data (teams, tyres, tracks). Pure `struct`. |
 | `state.py` | Merges packet types into one sorted broadcast snapshot. |
 | `server.py` | Async UDP listener + FastAPI WebSocket/static server. |
-| `mock_sender.py` | Emits fake F1 25 packets for offline testing. |
+| `mock_sender.py` | Emits fake F1 25 packets for offline testing; `--from-file` replays a recording instead. |
+| `recorder.py` | Captures raw incoming telemetry to `recordings/*.f1rec` for later replay. |
 | `config.py` | Loads `settings.json` (shared by server + mock sender). |
 | `settings.json` | Ports and push rate. |
 | `driver_names.json` | Driver name overrides (source name/number → display name). |

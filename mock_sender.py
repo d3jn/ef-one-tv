@@ -9,13 +9,16 @@ Pick the session with --mode:        python mock_sender.py --mode quali
 
 import argparse
 import math
+import os
 import random
 import socket
 import struct
+import sys
 import time
 
 import config
 import f1_packets as fp
+from recorder import RECORD_FMT, RECORD_HEADER_SIZE
 
 # Send to localhost on the same UDP port the server listens on (settings.json).
 HOST, PORT = "127.0.0.1", config.UDP_PORT
@@ -415,14 +418,58 @@ def main(session_type=SESSION_MODES["race"]):
         time.sleep(0.05)  # 20 Hz
 
 
+def replay_file(sock, path):
+    """Replay a recorder.py capture to (HOST, PORT) forever, reproducing the
+    original inter-packet timing. Loops back to the start at end-of-file."""
+    while True:
+        sent = 0
+        with open(path, "rb") as f:
+            wall_start = time.monotonic()
+            t0 = None
+            while True:
+                head = f.read(RECORD_HEADER_SIZE)
+                if len(head) < RECORD_HEADER_SIZE:
+                    break  # clean EOF -> loop
+                t, n = struct.unpack(RECORD_FMT, head)
+                data = f.read(n)
+                if len(data) < n:
+                    break  # truncated trailing record -> loop
+                if t0 is None:
+                    t0 = t  # first packet defines the timeline origin
+                delay = (wall_start + (t - t0)) - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+                sock.sendto(data, (HOST, PORT))
+                sent += 1
+        if sent == 0:
+            sys.exit(f"{path}: no telemetry records found (is this a recorder.py .f1rec file?)")
+        print(f"  …looped ({sent} packets)")
+
+
+def replay_main(path):
+    if not os.path.exists(path):
+        sys.exit(f"{path}: no such file")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    print(f"Replaying {path} to {HOST}:{PORT} on loop (Ctrl+C to stop)")
+    replay_file(sock, path)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Emit synthetic F1 25 telemetry.")
     parser.add_argument(
         "--mode", choices=SESSION_MODES, default="race",
         help="session type to emulate (default: race)",
     )
+    parser.add_argument(
+        "--from-file", metavar="PATH",
+        help="replay a recorder.py capture (recordings/*.f1rec) on loop, "
+             "ignoring --mode and the synthetic data",
+    )
     args = parser.parse_args()
     try:
-        main(SESSION_MODES[args.mode])
+        if args.from_file:
+            replay_main(args.from_file)
+        else:
+            main(SESSION_MODES[args.mode])
     except KeyboardInterrupt:
         pass

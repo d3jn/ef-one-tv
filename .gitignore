@@ -1,3 +1,6 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Raw telemetry captures from recorder.py
+recordings/
