@@ -15,6 +15,7 @@ Run:  python recorder.py
 (Point the game — or another sender — at this machine's telemetry port first.)
 """
 
+import argparse
 import os
 import socket
 import struct
@@ -47,7 +48,7 @@ def next_path():
     return os.path.join(RECORDINGS_DIR, f"{prefix}{highest + 1}{REC_EXT}")
 
 
-def main():
+def main(port=UDP_PORT):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     # A generous receive buffer so a burst of packets isn't dropped while we write.
@@ -55,10 +56,10 @@ def main():
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
     except OSError:
         pass
-    sock.bind(("0.0.0.0", UDP_PORT))
+    sock.bind(("0.0.0.0", port))
 
     path = next_path()
-    print(f"Recording F1 25 telemetry from UDP {UDP_PORT} to {path}")
+    print(f"Recording F1 25 telemetry from UDP {port} to {path}")
     print("Point the game at this machine's telemetry port and drive. Ctrl+C to stop.")
 
     packets = 0
@@ -83,4 +84,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Capture raw F1 25 UDP telemetry to recordings/ for later replay."
+    )
+    parser.add_argument(
+        "--port", type=int, default=UDP_PORT,
+        help=f"UDP port to listen on (default: settings.json udp_port, {UDP_PORT})",
+    )
+    args = parser.parse_args()
+    main(args.port)
