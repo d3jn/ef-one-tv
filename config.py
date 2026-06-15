@@ -56,6 +56,22 @@ DEFAULTS = {
     # No rebroadcasting by default. Each entry is an "host:port" UDP destination
     # to mirror raw incoming telemetry to.
     "retransmit_to": [],
+    # Per-track pit-loss overrides for the info overlay's pit projection, keyed by
+    # track slug: { "monza": {"green": 25, "sc": 17}, ... }. Empty = built-in
+    # estimates (see info.PITSTOP_TIMES).
+    "pit_time_lost": {},
+}
+
+# Track slug -> game track_id, for the pit_time_lost setting.
+TRACK_SLUG_TO_ID = {
+    "melbourne": 0, "paul_ricard": 1, "shanghai": 2, "sakhir": 3, "catalunya": 4,
+    "monaco": 5, "montreal": 6, "silverstone": 7, "hockenheim": 8, "hungaroring": 9,
+    "spa_francorchamps": 10, "monza": 11, "marina_bay": 12, "suzuka": 13,
+    "yas_marina": 14, "austin": 15, "interlagos": 16, "red_bull_ring": 17,
+    "sochi": 18, "mexico_city": 19, "baku": 20, "sakhir_short": 21,
+    "silverstone_short": 22, "austin_short": 23, "suzuka_short": 24, "hanoi": 25,
+    "zandvoort": 26, "imola": 27, "portimao": 28, "jeddah": 29, "miami": 30,
+    "las_vegas": 31, "losail": 32,
 }
 
 
@@ -174,6 +190,30 @@ def _normalize_retransmit(raw):
 
 
 RETRANSMIT_TO = _normalize_retransmit(_settings["retransmit_to"])
+
+
+def _normalize_pit_times(raw):
+    """Parse the pit_time_lost map (track slug -> {green, sc} seconds) into
+    {track_id: {green, sc}} for the pit projection. Bad slugs/values are skipped
+    with a warning so one typo can't break startup."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for slug, vals in raw.items():
+        tid = TRACK_SLUG_TO_ID.get(slug)
+        if tid is None or not isinstance(vals, dict):
+            sys.stderr.write(f"settings.json: ignoring pit_time_lost entry {slug!r}\n")
+            continue
+        entry = {}
+        for key in ("green", "sc"):
+            if isinstance(vals.get(key), (int, float)):
+                entry[key] = vals[key]
+        if entry:
+            out[tid] = entry
+    return out
+
+
+PIT_TIME_OVERRIDES = _normalize_pit_times(_settings["pit_time_lost"])
 
 
 def resolve_driver_name(name, number):

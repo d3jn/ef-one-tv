@@ -79,8 +79,36 @@ scales to fit); the background is transparent and each block is pinned top-left.
 | `/standings` | **660 × 960** | The timing tower (incl. the session-flag tab and penalty/finish tabs that extend right of it; height covers the 22-car maximum). |
 | `/quali_lap_sectors` | **376 × 132** | The live qualifying lap-sector block for the active driver. |
 | `/inputs` | **480 × 150** | A scrolling throttle (green) / brake (red) trace for the active driver (~5s window), with a status-pill row: RPM, ERS mode, brake bias, on-throttle diff. |
+| `/info` | **600 × 640** | The driver-info companion: 3 race pages (live / pit & weather / pace), switched in-game via UDP Actions. See [Info overlay](#info-overlay-driver-companion). |
 
-<http://localhost:5000> is a landing page linking to both.
+<http://localhost:5000> is a landing page linking to all of them.
+
+### Info overlay (driver companion)
+
+`/info` is a compact in-race companion (ported from the F1 Racing Companion
+overlay) with three pages, plus a persistent ahead/behind header (gap, tyre,
+wear, battery, ERS mode) on every page. It's race-focused — most of it stays
+hidden in practice/qualifying.
+
+- **Page 1 — Live:** your tyre wear with a laps-left projection (extrapolated to
+  the 80% wear cap from your last clean lap, shown against the race laps left),
+  ERS state with per-lap / since-SF battery deltas, and standings ±5 around you
+  with gaps relative to your car, tyre/wear, front-wing damage and penalties.
+- **Page 2 — Pit & weather:** a pit projection (where you'd rejoin, gaps to the
+  cars ahead/behind after the stop, expected pit loss for green vs SC, and any
+  penalties owed) plus the weather forecast.
+- **Page 3 — Pace:** fastest S1/S2/S3 per tyre compound across all cars' last 3
+  laps (with `*` stars for the compound winning each sector and a hot `!` marker
+  for a still-standing time), and a leader/ahead/you/behind pace-and-wear table
+  (avg lap + falloff vs the stint's frozen optimal-pace baseline).
+
+**Switching pages:** bind **UDP Action 1** (next) and **UDP Action 2** (previous)
+in the game's controls — they aren't bound by default. The active page is tracked
+server-side, so every viewer of `/info` shows the same page.
+
+Per-track pit losses for the projection default to built-in estimates; override
+them in `settings.json` under `pit_time_lost` (keyed by track slug), e.g.
+`{"monza": {"green": 25, "sc": 17}}`.
 
 ## Settings
 
@@ -146,6 +174,7 @@ copy next to the exe and falls back to the embedded one.
 |------|------|
 | `f1_packets.py` | Packet parsers + reference data (teams, tyres, tracks). Pure `struct`. |
 | `state.py` | Merges packet types into one sorted broadcast snapshot. |
+| `info.py` | Driver-info overlay calc layer: wear/ERS/sector/stint trackers + pit projection. |
 | `server.py` | Async UDP listener + FastAPI WebSocket/static server. |
 | `mock_sender.py` | Emits fake F1 25 packets for offline testing; `--from-file` replays a recording instead. |
 | `recorder.py` | Captures raw incoming telemetry to `recordings/*.f1rec` for later replay. |

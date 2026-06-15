@@ -151,7 +151,35 @@ def session_packet(frame, session_type=15, yellow=False, safety_car=0):
                     3 if (yellow and i == 0) else 0)
         for i in range(fp.MAX_MARSHAL_ZONES)
     )
-    return header(fp.PACKET_SESSION, frame) + pre + zones + struct.pack("<B", safety_car)
+    # safetyCarStatus, networkGame, numWeatherForecastSamples, then the samples.
+    tail = struct.pack("<BBB", safety_car, 1, 4)
+    for off, wx, rain in [(0, 1, 0), (5, 2, 10), (15, 3, 45), (30, 4, 70)]:
+        tail += struct.pack(fp.WEATHER_SAMPLE_FMT, session_type, off, wx, 30, 2, 24, 2, rain)
+    return header(fp.PACKET_SESSION, frame) + pre + zones + tail
+
+
+def car_damage_packet(frame, t):
+    """Tyre wear (grows with tyre age) + front-wing damage on car 4, for the
+    info overlay's wear columns and FW indicators."""
+    body = b""
+    for i in range(fp.NUM_CARS):
+        if i < NUM_ACTIVE:
+            age = (int(t) // 3 + i) % 25
+            base = min(78.0, 6.0 + age * 2.0 + i * 0.5)
+            wear = [base, base - 1, base - 2, base - 3]
+            dmg = [0] * 30
+            if i == 4:
+                dmg[12], dmg[13] = 28, 5   # FL/FR wing (overall indices 16/17)
+        else:
+            wear = [0.0] * 4
+            dmg = [0] * 30
+        body += struct.pack(fp.CAR_DAMAGE_FMT, *wear, *dmg)
+    return header(fp.PACKET_CAR_DAMAGE, frame) + body
+
+
+def butn_event(frame, mask):
+    """A BUTN event carrying a 32-bit button bitmask (UDP Actions)."""
+    return header(fp.PACKET_EVENT, frame) + b"BUTN" + struct.pack("<I", mask)
 
 
 def scar_event(frame, sc_type, event_type):
@@ -170,6 +198,26 @@ def flag_demo(t):
     return (False, 0)                   # racing resumes (resume event on entry)
 
 
+def race_order(t):
+    """Active cars ranked into a clean position permutation (1..NUM_ACTIVE) by a
+    slowly-wobbling per-car score, so positions stay a true ordering (cars swap,
+    none share or gap). The player (car 0) is biased to mid-pack so it always has
+    cars both ahead and behind — for the info header, pit projection, and the
+    ±5 standings window. Returns {car_idx: position}."""
+    def score(i):
+        base = NUM_ACTIVE / 2 if i == 0 else i
+        return base + math.sin(t * 0.25 + i) * 1.5
+    order = sorted(range(NUM_ACTIVE), key=lambda i: (score(i), i))
+    return {idx: pos + 1 for pos, idx in enumerate(order)}
+
+
+def ahead_behind(t):
+    """(ahead_idx, behind_idx) relative to the player (car 0), by race position."""
+    pos = race_order(t)
+    by_pos = {p: idx for idx, p in pos.items()}
+    return by_pos.get(pos[0] - 1), by_pos.get(pos[0] + 1)
+
+
 def lap_packet(frame, t, quali=False):
     body = b""
     # In quali, every car shares one looping flying lap so the active car's clock
@@ -178,16 +226,23 @@ def lap_packet(frame, t, quali=False):
     flap_num, flap_time, fsector = flying_lap(t)
     cur_lap_ms = flap_time if quali else int(t * 1000) % 95000
     cur_sector = fsector if quali else 0
+    order = race_order(t)   # clean position permutation (race)
     for i in range(fp.NUM_CARS):
         cur_s1 = cur_s2 = 0   # this lap's S1/S2 splits (filled for the active car)
         if i < NUM_ACTIVE:
             # Positions shuffle slowly so rows visibly reorder on the tower; the
             # active car holds P1 in quali so its panel number doesn't jitter.
-            wobble = math.sin(t * 0.25 + i) * 1.5
-            position = max(1, min(NUM_ACTIVE, round(i + 1 + wobble)))
-            # Leader has no gap to itself; others are always positive deltas.
-            gap_ms = 0 if i == 0 else max(0, int(i * 1100 + math.sin(t + i) * 400))
-            interval_ms = 0 if i == 0 else int(900 + math.sin(t * 0.7 + i) * 350)
+            position = order[i]
+            # Race gaps grow with position (monotonic) so the leader is 0 and the
+            # info header's ahead/behind deltas carry the right sign. Quali keeps
+            # its index-based spread (its tower reorders by lap time anyway).
+            if quali:
+                gap_ms = 0 if i == 0 else max(0, int(i * 1100 + math.sin(t + i) * 400))
+                interval_ms = 0 if i == 0 else int(900 + math.sin(t * 0.7 + i) * 350)
+            else:
+                step = 1100 + math.sin(t * 0.3) * 150
+                gap_ms = int((position - 1) * step)
+                interval_ms = 0 if position == 1 else int(step)
             last_lap_ms = int(92000 + i * 120 + math.sin(t * 0.1 + i) * 300)
             if quali and i == 0:
                 position = 1
@@ -290,18 +345,31 @@ def telemetry_packet(frame, t):
 
 def status_packet(frame, t):
     compounds = [16, 17, 18]  # soft, medium, hard
+    # The cars directly ahead of / behind the player get distinct random ERS
+    # modes, re-rolled every 2s, so the info header's ERS column visibly changes.
+    ahead_idx, behind_idx = ahead_behind(t)
+    seg = int(t // 2)
+    ahead_mode = random.Random(f"ers-ahead-{seg}").randrange(4)
+    behind_mode = random.Random(f"ers-behind-{seg}").randrange(4)
+    if behind_mode == ahead_mode:
+        behind_mode = (behind_mode + 1) % 4   # keep ahead and behind different
     body = b""
     for i in range(fp.NUM_CARS):
         visual = compounds[i % 3] if i < NUM_ACTIVE else 0
         age = (int(t) // 3 + i) % 25 if i < NUM_ACTIVE else 0
         ers = PLAYER_ERS_J if i == 0 else 2_000_000.0  # player has enough to show
+        brake_bias = 50
         # Active car (0): cycle the ERS mode through none/medium/hotlap/overtake
         # and drift the brake bias, so the /inputs pills visibly change.
         if i == 0:
             ers_mode = int(t // 4) % 4
             brake_bias = int(54 + math.sin(t * 0.15) * 4)   # ~50–58 %, live
+        elif i == ahead_idx:
+            ers_mode = ahead_mode
+        elif i == behind_idx:
+            ers_mode = behind_mode
         else:
-            ers_mode, brake_bias = 1, 50
+            ers_mode = 1
         body += struct.pack(
             fp.CAR_STATUS_FMT,
             2, 1, 1, brake_bias, 0, 100.0, 110.0, 18.0, 13000, 4000,
@@ -408,6 +476,13 @@ def main(session_type=SESSION_MODES["race"]):
         sock.sendto(lap_packet(frame, t, quali), (HOST, PORT))
         sock.sendto(telemetry_packet(frame, t), (HOST, PORT))
         sock.sendto(status_packet(frame, t), (HOST, PORT))
+        sock.sendto(car_damage_packet(frame, t), (HOST, PORT))
+        # Cycle the info overlay's pages every ~8s via a UDP Action 1 edge
+        # (press one tick, release the next) so page switching is demoable.
+        if frame % 160 == 0:
+            sock.sendto(butn_event(frame, fp.UDP_ACTION_1_MASK), (HOST, PORT))
+        elif frame % 160 == 5:
+            sock.sendto(butn_event(frame, 0), (HOST, PORT))
         # Session history is one car per packet. The active car (0) goes out every
         # tick so its sector colours stay crisp; the rest cycle through the grid
         # (~1s for all 20), like the game does.

@@ -55,6 +55,20 @@ MARSHAL_ZONE_FMT = "<fb"
 MARSHAL_ZONE_SIZE = struct.calcsize(MARSHAL_ZONE_FMT)  # 5
 MAX_MARSHAL_ZONES = 21
 
+# After the marshal zones + safetyCarStatus comes networkGame(B),
+# numWeatherForecastSamples(B), then that many WeatherForecastSamples. Each is
+# sessionType(B) timeOffset(B) weather(B) trackTemp(b) trackTempChange(b)
+# airTemp(b) airTempChange(b) rainPct(B) = 8 bytes.
+WEATHER_SAMPLE_FMT = "<BBBbbbbB"
+WEATHER_SAMPLE_SIZE = struct.calcsize(WEATHER_SAMPLE_FMT)  # 8
+WEATHER_TYPES = {0: "Clear", 1: "Light cloud", 2: "Overcast",
+                 3: "Light rain", 4: "Heavy rain", 5: "Storm"}
+
+# Car Damage (packet 10): m_tyresWear[4] (float %) then 30 uint8 damage fields.
+# We read tyre wear (0-3) and the two front-wing values (16, 17).
+CAR_DAMAGE_FMT = "<4f30B"
+CAR_DAMAGE_SIZE = struct.calcsize(CAR_DAMAGE_FMT)  # 46
+
 # Session History (packet 11, one car per packet, 1460 bytes). Fixed-size arrays:
 # 100 lap-history entries followed by 8 tyre-stint slots. We only need the
 # best-lap lap number and the tyre stints, so we skip over the lap array.
@@ -73,6 +87,7 @@ PACKET_EVENT = 3
 PACKET_PARTICIPANTS = 4
 PACKET_CAR_SETUPS = 5
 PACKET_CAR_TELEMETRY = 6
+PACKET_CAR_DAMAGE = 10
 PACKET_CAR_STATUS = 7
 PACKET_SESSION_HISTORY = 11
 
@@ -247,6 +262,9 @@ def parse_lap(data):
             "lap_invalid": l[18],         # 0 = valid, 1 = current lap invalidated
             "penalties_sec": l[19],       # accumulated time penalty (seconds)
             "drive_through": l[22],       # unserved drive-through penalties
+            "unserved_sg": l[23],         # unserved stop-go penalties (info block)
+            "total_distance": l[11],      # total race distance (m), for lap-down math
+            "should_serve_pen": l[30],    # m_pitStopShouldServePen (pit projection)
             "driver_status": l[25],       # 3 = out lap (see DRIVER_STATUS_OUT_LAP)
             "result_status": l[26],
         })
@@ -317,8 +335,27 @@ def parse_session(data):
             break
     sc_off = zones_off + MAX_MARSHAL_ZONES * MARSHAL_ZONE_SIZE
     safety_car_status = struct.unpack_from("<B", data, sc_off)[0]
+    # safetyCarStatus(B), networkGame(B), numWeatherForecastSamples(B), then the
+    # forecast samples. Used by the info block's page-2 weather panel.
+    weather_forecast = []
+    try:
+        num_samples = struct.unpack_from("<B", data, sc_off + 2)[0]
+        w_off = sc_off + 3
+        for _ in range(min(num_samples, 64)):
+            if w_off + WEATHER_SAMPLE_SIZE > len(data):
+                break
+            w = struct.unpack_from(WEATHER_SAMPLE_FMT, data, w_off)
+            weather_forecast.append({
+                "time_offset": w[1],   # minutes ahead
+                "weather": w[2],       # 0-5, see WEATHER_TYPES
+                "rain_pct": w[7],      # 0-100
+            })
+            w_off += WEATHER_SAMPLE_SIZE
+    except struct.error:
+        pass
     return {
         "total_laps": s[3],
+        "track_length_m": s[4],
         "session_type": s[5],
         "session_type_name": session_type_name(s[5]),
         "track_id": s[6],
@@ -326,6 +363,7 @@ def parse_session(data):
         "session_time_left": s[8],   # seconds remaining (quali countdown)
         "marshal_yellow": marshal_yellow,
         "safety_car_status": safety_car_status,  # 0 none, 1 full SC, 2 VSC
+        "weather_forecast": weather_forecast,
         # Spectator state: who's being watched. m_playerCarIndex is meaningless
         # while spectating, so the spectated index is the authoritative "active
         # car" then (see GameState.snapshot).
@@ -344,6 +382,31 @@ def parse_event(data):
         sc_type, event_type = struct.unpack_from("<BB", data, HEADER_SIZE + 4)
         out["safety_car_type"] = sc_type
         out["safety_car_event"] = event_type
+    elif code == "BUTN":
+        # Button-status event: a 32-bit bitmask of currently-pressed buttons.
+        # Used to flip the info overlay's pages via bound UDP Actions.
+        out["buttons"] = struct.unpack_from("<I", data, HEADER_SIZE + 4)[0]
+    return out
+
+
+# UDP Action button masks (the info block uses Action 1/2 to page next/prev).
+UDP_ACTION_1_MASK = 0x00100000
+UDP_ACTION_2_MASK = 0x00200000
+
+
+def parse_car_damage(data):
+    """Per-car tyre wear (worst corner drives the info block) and front-wing
+    damage. tyre_wear is four floats (RL, RR, FL, FR) in percent."""
+    out = []
+    offset = HEADER_SIZE
+    for _ in range(NUM_CARS):
+        d = struct.unpack_from(CAR_DAMAGE_FMT, data, offset)
+        out.append({
+            "tyre_wear": [d[0], d[1], d[2], d[3]],
+            "fw_left": d[16],
+            "fw_right": d[17],
+        })
+        offset += CAR_DAMAGE_SIZE
     return out
 
 

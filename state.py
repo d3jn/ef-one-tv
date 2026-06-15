@@ -9,6 +9,7 @@ import time
 
 import config
 import f1_packets as fp
+import info
 
 GREEN_FLAG_SECONDS = 3.0  # how long "GREEN FLAG" stays after a resume-race event
 
@@ -77,6 +78,10 @@ class GameState:
         self.panel_shown_lap = [0] * fp.NUM_CARS
         self.panel_hold_until = [0.0] * fp.NUM_CARS
         self.num_active_cars = 0
+        # Car-damage fragments (tyre wear + front wing) for the info overlay.
+        self.damage = [None] * fp.NUM_CARS
+        # Info overlay: trackers + server-side page state (driven by UDP actions).
+        self.info = info.InfoState()
 
     def update(self, data):
         """Feed one raw UDP datagram in. Unknown/short packets are ignored."""
@@ -96,10 +101,13 @@ class GameState:
             elif pid == fp.PACKET_LAP:
                 self.lap = fp.parse_lap(data)
                 self._update_sector_view()
+                self.info.observe(self)   # feed the info trackers per lap packet
             elif pid == fp.PACKET_CAR_TELEMETRY:
                 self.telemetry = fp.parse_car_telemetry(data)
             elif pid == fp.PACKET_CAR_STATUS:
                 self.status = fp.parse_car_status(data)
+            elif pid == fp.PACKET_CAR_DAMAGE:
+                self.damage = fp.parse_car_damage(data)
             elif pid == fp.PACKET_CAR_SETUPS:
                 self.setups = fp.parse_car_setups(data)
             elif pid == fp.PACKET_SESSION_HISTORY:
@@ -109,6 +117,8 @@ class GameState:
                 ev = fp.parse_event(data)
                 if ev.get("code") == "SCAR" and ev.get("safety_car_event") == 3:
                     self.resume_racing_until = time.monotonic() + GREEN_FLAG_SECONDS
+                elif ev.get("code") == "BUTN":
+                    self.info.on_button(ev.get("buttons", 0))   # info page switch
             elif pid == fp.PACKET_SESSION:
                 self.session = fp.parse_session(data)
         except Exception:
@@ -493,6 +503,7 @@ class GameState:
             "cars": rows,
             "sectorPanel": sector_panel,   # live sector block (quali only; else None)
             "inputs": inputs,              # {throttle, brake} of the active car, or None
+            "info": self.info.build(self, active_idx),  # driver-info pages + header
         }
 
 

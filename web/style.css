@@ -171,8 +171,9 @@ html, body {
   box-shadow: 0 0 10px rgba(176, 38, 255, 0.85);
 }
 
-/* Position cell with team-colour accent bar */
-.pos {
+/* Position cell with team-colour accent bar. Scoped to .row so this (and its
+   ::before bar) can't leak onto other blocks that also use a .pos class. */
+.row .pos {
   position: relative;
   display: flex;
   align-items: center;
@@ -181,7 +182,7 @@ html, body {
   font-size: 18px;
   font-weight: 800;
 }
-.pos::before {
+.row .pos::before {
   content: "";
   position: absolute;
   left: 0;
@@ -456,3 +457,138 @@ html, body {
   letter-spacing: 0.5px;
 }
 
+
+/* --- Info overlay (/info): driver companion, 3 pages + ahead/behind header --- */
+#info-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 392px;
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+#info-body { padding: 8px 10px 10px; }
+#info-panel .muted { color: var(--ink-dim); font-size: 15px; padding: 8px 2px; }
+
+/* Title bar: page number chip + name */
+.banner { text-align: center; font-size: 22px; font-weight: 800; letter-spacing: 3px;
+          color: var(--accent); padding: 10px 0; }
+
+/* Tyre compound: a single colour-coded letter (S red / M yellow / H white /
+   I green / W blue), coloured by --t — same idiom as the standings tower. */
+.t-letter {
+  display: inline-block; min-width: 14px; text-align: center;
+  font-size: 15px; font-weight: 800; color: var(--t, #8893a3);
+}
+
+/* Wear colour scale */
+.wear-lo { color: #46d06a; }
+.wear-mid { color: #e6c93f; }
+.wear-hi { color: #ff5a52; }
+
+/* ERS mode pills (shared look with the inputs block, darker fills) */
+.hdr-ers { padding: 1px 7px; border-radius: 4px; font-size: 12px; font-weight: 800; color: #fff; }
+.ers-none { background: #464b54; } .ers-medium { background: #a8870c; }
+.ers-hotlap { background: #b5560a; } .ers-overtake { background: #9a1f1f; }
+
+/* Signed gaps in the info block: ahead/faster = blue, behind/slower = red.
+   Named g-pos/g-neg so they don't collide with the tower's .pos position cell. */
+.g-neg { color: #6fd3ff; }
+.g-pos { color: #ff8a84; }
+
+/* Persistent ahead/behind header */
+.info-header { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;
+               padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.hdr-row { display: grid; grid-template-columns: 46px 52px 14px 36px 34px max-content max-content;
+           align-items: center; gap: 7px; height: 24px; font-size: 14px; font-weight: 700; }
+.hdr-row.empty { color: var(--ink-dim); }
+.hdr-tag { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); }
+.hdr-gap { text-align: right; } .hdr-wear { text-align: right; } .hdr-batt { color: var(--ink-dim); }
+
+/* Player extras (page 1) */
+.player-extras { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.pe-row { display: flex; align-items: baseline; gap: 10px; }
+.pe-key { font-size: 12px; font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); width: 38px; }
+.pe-big { font-size: 14px; font-weight: 800; }
+.pe-sub { font-size: 13px; color: var(--ink-dim); }
+.deg { font-size: 14px; color: var(--ink-dim); }
+.laps-left { font-size: 15px; font-weight: 700; margin-left: auto; }
+.ers-d { font-size: 13px; color: var(--ink-dim); }
+
+/* Generic row lists (standings / grid) */
+.info-rows { display: flex; flex-direction: column; }
+.grid-note { font-size: 13px; font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); margin: 4px 0 6px; }
+/* Standings: ALL columns fixed width (no auto/flex except the name) so every
+   value sits in the same column on every row, regardless of which cells are
+   empty — penalties/FW on one row can't shove the others out of line. */
+.srow { display: grid; grid-template-columns: 18px 1fr 52px 16px 34px 46px 56px;
+        align-items: center; gap: 6px; height: 26px; font-size: 14px; font-weight: 700;
+        border-bottom: 1px solid rgba(0,0,0,0.3); }
+.srow .pos { color: var(--ink-dim); font-weight: 800; text-align: center; }
+.srow.me { background: rgba(225,6,0,0.18); border-radius: 4px; }
+.srow .name { font-weight: 800; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow .gap { text-align: right; }
+.srow .cmp { text-align: center; }
+.srow .wear { text-align: right; }
+.srow .fw { color: #ffb454; font-size: 12px; text-align: right; }
+.srow .pen { color: #ffd12e; font-size: 12px; font-weight: 800; white-space: nowrap;
+             overflow: hidden; text-overflow: ellipsis; }
+/* Compact column header for the standings table. */
+.srow.shead { height: 17px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+.srow.shead span { color: var(--ink-dim); font-size: 10px; font-weight: 800; letter-spacing: 0.5px; }
+
+/* Formation/race-start grid: its own 3-column layout (pos / name / compound). */
+.grow { display: grid; grid-template-columns: 20px 1fr 16px; align-items: center;
+        gap: 6px; height: 26px; font-size: 14px; font-weight: 700;
+        border-bottom: 1px solid rgba(0,0,0,0.3); }
+.grow.me { background: rgba(225,6,0,0.18); border-radius: 4px; }
+.grow .pos { color: var(--ink-dim); font-weight: 800; text-align: center; }
+.grow .name { font-weight: 800; }
+.grow .cmp { text-align: center; }
+
+/* Pit projection (page 2) */
+.pit-box { margin-bottom: 10px; }
+.pit-main { display: flex; align-items: baseline; gap: 8px; }
+.pit-key { font-size: 13px; font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); }
+.pit-pos { font-size: 14px; font-weight: 800; }
+.pit-lost { font-size: 14px; color: var(--ink-dim); }
+.pit-gaps { display: flex; gap: 12px; font-size: 14px; margin-top: 4px; }
+.pit-g b { color: var(--ink-dim); font-weight: 700; }
+.pit-pen { font-size: 13px; color: #ffd12e; margin-top: 5px; }
+
+/* Weather */
+.weather-title, .sec-title, .pace-title { font-size: 12px; font-weight: 800; letter-spacing: 1px;
+  color: var(--ink-dim); margin: 8px 0 5px; }
+.weather-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.wx { display: flex; align-items: center; gap: 5px; background: var(--panel-row);
+      border-radius: 4px; padding: 3px 6px; font-size: 13px; overflow: hidden; }
+.wx-t { color: var(--ink-dim); } .wx-w { font-weight: 700; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; }
+.wx-r { margin-left: auto; } .wx-r.rainy { color: #6fb8ff; font-weight: 800; }
+
+/* Sectors table (page 3) */
+.sec-table { display: flex; flex-direction: column; }
+.sec-row { display: grid; grid-template-columns: 40px 1fr 1fr 1fr; align-items: center;
+           gap: 6px; height: 26px; font-size: 14px; }
+.sec-head { color: var(--ink-dim); font-size: 12px; font-weight: 800; }
+.sec-head span { text-align: right; }
+.sec-cmp { font-weight: 800; color: var(--t, var(--ink)); }
+.sec-cmp i { color: var(--ink); font-style: normal; }
+.sec-cell { text-align: right; font-weight: 700; }
+.sec-cell.best { color: #46d06a; } .sec-cell.delta { color: var(--ink-dim); }
+.sec-cell.dash { color: #4a5260; }
+.sec-cell .hot { color: var(--accent); font-style: normal; font-weight: 800; margin-left: 2px; }
+
+/* Pace table (page 3) */
+.pace-table { display: flex; flex-direction: column; }
+.pace-row { display: grid; grid-template-columns: 26px 1fr 16px 74px 60px 48px;
+            align-items: center; gap: 6px; height: 26px; font-size: 14px; font-weight: 700; }
+.pace-head { color: var(--ink-dim); font-size: 12px; font-weight: 800; }
+.pace-row.me { background: rgba(225,6,0,0.18); border-radius: 4px; }
+.pace-row .pl { font-weight: 800; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pace-row .pw i { color: var(--ink-dim); font-style: normal; font-size: 11px; }
+.pace-row .pa { text-align: right; } .pace-row .pd { text-align: right; color: #ffb454; }
+.pace-head .pa, .pace-head .pd, .pace-head .pw { text-align: right; }
