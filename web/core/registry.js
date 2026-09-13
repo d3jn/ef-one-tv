@@ -4,7 +4,7 @@
  * import time. A block is a plain object:
  *
  *   {
- *     name:     "standings",          // matches the URL path / HUD_VIEW
+ *     name:     "info",               // matches the URL path / HUD_VIEW
  *     template: "<div id=…>…</div>",  // markup injected into #stage on mount
  *     size:     { w, h },             // design footprint (px); the stage is sized
  *                                     //   to it so an OBS source can match it

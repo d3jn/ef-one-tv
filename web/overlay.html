@@ -7,10 +7,10 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- Generic overlay shell, served at every block route (/standings,
-       /quali_lap_sectors, …). main.js resolves the route to a block and injects
-       that block's markup into #stage. Design surface is a fixed 1920×1080 so it
-       drops straight into OBS as a browser source over gameplay capture. -->
+  <!-- Generic overlay shell, served at every block route (/info, …). main.js
+       resolves the route to a block and injects that block's markup into
+       #stage, sized to the block's footprint so it drops straight into OBS as a
+       browser source over gameplay capture. -->
   <div id="stage"></div>
   <script type="module" src="/main.js"></script>
 </body>

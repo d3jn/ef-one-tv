@@ -10,27 +10,21 @@ Keys:
     http_host  interface the graphics page binds to     (default 127.0.0.1)
     http_port  port the graphics page is served on       (default 5000)
     push_hz    snapshots/sec pushed to the browser       (default 20)
-    brand_mark text shown in the red header badge         (default "F1")
-    mode_rotation  standings-mode pools + auto-rotation, passed to the browser:
-               { "enabled": bool,                       # auto-advance on/off
-                 "pools":     { "race"|"quali"|"other": [mode, …] },  # ordered
-                 "durations": { mode: seconds } }        # missing -> 5s
-               Pools define the available modes per session kind (and their
-               manual-cycle order) regardless of "enabled"; durations only
-               matter while rotating. Valid modes: gap, interval, tyre (race),
-               gap_quali (quali).
     retransmit_to  list of "host:port" strings to mirror raw incoming telemetry
                to (default []). Every UDP datagram is forwarded verbatim, as it
                arrives — unthrottled, independent of push_hz — so another tool
                on the network can read the same feed. IPv4 host:port; malformed
                entries are skipped with a warning.
+    pit_time_lost  per-track pit-loss overrides for the info overlay's pit
+               projection (default {}), keyed by track slug:
+               { "monza": {"green": 25, "sc": 17}, … }
 
 Driver name overrides live in their own file, driver_names.json (next to
 settings.json): a list of {source_name, source_number, target_name} objects used
 to swap displayed driver names. A missing file means no overrides.
 
-Overlay placement is no longer configurable: each overlay is served on its own
-endpoint (/standings, /quali_lap_sectors) and pinned top-left in CSS.
+Overlay placement is not configurable: the overlay is served on its own
+endpoint (/info) and pinned top-left in CSS.
 """
 
 import json
@@ -42,17 +36,6 @@ DEFAULTS = {
     "http_host": "127.0.0.1",
     "http_port": 5000,
     "push_hz": 20,
-    "brand_mark": "F1",
-    # Off by default: same pools as the built-in client fallback, no rotation.
-    "mode_rotation": {
-        "enabled": False,
-        "pools": {
-            "race": ["gap", "interval", "tyre"],
-            "quali": ["gap_quali"],
-            "other": ["gap"],
-        },
-        "durations": {},
-    },
     # No rebroadcasting by default. Each entry is an "host:port" UDP destination
     # to mirror raw incoming telemetry to.
     "retransmit_to": [],
@@ -62,16 +45,16 @@ DEFAULTS = {
     "pit_time_lost": {},
 }
 
-# Track slug -> game track_id, for the pit_time_lost setting.
+# Track slug -> game track_id (2026 appendix "Track IDs"), for the pit_time_lost
+# setting.
 TRACK_SLUG_TO_ID = {
-    "melbourne": 0, "paul_ricard": 1, "shanghai": 2, "sakhir": 3, "catalunya": 4,
-    "monaco": 5, "montreal": 6, "silverstone": 7, "hockenheim": 8, "hungaroring": 9,
+    "melbourne": 0, "shanghai": 2, "sakhir": 3, "catalunya": 4,
+    "monaco": 5, "montreal": 6, "silverstone": 7, "hungaroring": 9,
     "spa_francorchamps": 10, "monza": 11, "marina_bay": 12, "suzuka": 13,
     "yas_marina": 14, "austin": 15, "interlagos": 16, "red_bull_ring": 17,
-    "sochi": 18, "mexico_city": 19, "baku": 20, "sakhir_short": 21,
-    "silverstone_short": 22, "austin_short": 23, "suzuka_short": 24, "hanoi": 25,
-    "zandvoort": 26, "imola": 27, "portimao": 28, "jeddah": 29, "miami": 30,
-    "las_vegas": 31, "losail": 32,
+    "mexico_city": 19, "baku": 20, "zandvoort": 26, "imola": 27, "jeddah": 29,
+    "miami": 30, "las_vegas": 31, "losail": 32, "silverstone_reverse": 39,
+    "red_bull_ring_reverse": 40, "zandvoort_reverse": 41, "madrid": 42,
 }
 
 
@@ -146,25 +129,7 @@ UDP_PORT = int(_settings["udp_port"])
 HTTP_HOST = str(_settings["http_host"])
 HTTP_PORT = int(_settings["http_port"])
 PUSH_HZ = int(_settings["push_hz"])
-BRAND_MARK = str(_settings["brand_mark"])
 DRIVER_NAME_OVERRIDES = load_driver_names()
-
-
-def _normalize_rotation(raw):
-    """Coerce the mode_rotation block into a predictable shape for the client:
-    a dict with bool `enabled` and dict `pools`/`durations`. Bad types collapse
-    to empty so the client falls back to its built-in pools / 5s defaults."""
-    raw = raw if isinstance(raw, dict) else {}
-    pools = raw.get("pools")
-    durations = raw.get("durations")
-    return {
-        "enabled": bool(raw.get("enabled", False)),
-        "pools": pools if isinstance(pools, dict) else {},
-        "durations": durations if isinstance(durations, dict) else {},
-    }
-
-
-MODE_ROTATION = _normalize_rotation(_settings["mode_rotation"])
 
 
 def _normalize_retransmit(raw):

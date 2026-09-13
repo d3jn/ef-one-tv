@@ -1,14 +1,22 @@
-"""F1 25 UDP packet parsers — pure stdlib, no third-party telemetry libraries.
+"""F1 UDP packet parsers for the 2026 format — pure stdlib, no third-party
+telemetry libraries.
 
-Format strings and tuple indices are hand-derived from the F1 25 UDP spec in
-specs/f1_25_telemetry_structures.txt. Indices are POSITIONAL against those
-formats: adding/removing a field shifts every later index, so reverify against
-the spec when bumping the game year.
+Targets the "2026" UDP format shipped with the F1 25 2026 Season Pack (in-game
+UDP Format: 2026). Packets in any other format are rejected by PACKET_FORMAT.
+
+Format strings and tuple indices are hand-derived from the spec in
+specs/f1_2026_telemetry_structures.txt; the appendices (team / track / session
+type ids, button flags) are only in specs/f1_2026_data_output.pdf. Indices are
+POSITIONAL against those formats: adding/removing a field shifts every later
+index, so reverify against the spec when bumping the format.
 
 Wheel/tyre arrays in the F1 spec are ordered RL, RR, FL, FR.
 """
 
 import struct
+
+# m_packetFormat value this module parses (header field 0).
+PACKET_FORMAT = 2026
 
 # --- Header (29 bytes) -------------------------------------------------------
 # uint16 packetFormat, uint8 gameYear, uint8 majorVer, uint8 minorVer,
@@ -19,123 +27,81 @@ HEADER_FMT = "<HBBBBBQfIIBB"
 HEADER_SIZE = struct.calcsize(HEADER_FMT)  # 29
 
 # --- Per-car blocks ----------------------------------------------------------
-# Car Telemetry: speed(H) throttle(f) steer(f) brake(f) clutch(B) gear(b)
-# rpm(H) drs(B) revPct(B) revBits(H) brakeTemps[4](H) tyreSurf[4](B)
-# tyreInner[4](B) engineTemp(H) tyrePressure[4](f) surfaceType[4](B).
-CAR_TELEMETRY_FMT = "<HfffBbHBBH4H4B4BH4f4B"
-CAR_TELEMETRY_SIZE = struct.calcsize(CAR_TELEMETRY_FMT)  # 60
-
-# Lap Data: see spec lines 210-245. 57 bytes per car.
+# Lap Data: see spec struct LapData (line 241). 57 bytes per car, unchanged
+# from 2025. Packet: 29 + 24 * 57 + 2 = 1399 bytes.
 LAP_DATA_FMT = "<IIHBHBHBHBfffBBBBBBBBBBBBBBBHHBfB"
 LAP_DATA_SIZE = struct.calcsize(LAP_DATA_FMT)  # 57
 
-# Car Status: see spec lines 536-568. 55 bytes per car.
-CAR_STATUS_FMT = "<BBBBBfffHHBBHBBBbfffBfffB"
-CAR_STATUS_SIZE = struct.calcsize(CAR_STATUS_FMT)  # 55
+# Car Status: see spec struct CarStatusData (line 568). 59 bytes per car — 2026
+# inserted m_ersHarvestLimitPerLap (float) after m_ersHarvestedThisLapMGUH, past
+# every field we read. Packet: 29 + 24 * 59 = 1445 bytes.
+CAR_STATUS_FMT = "<BBBBBfffHHBBHBBBbfffBffffB"
+CAR_STATUS_SIZE = struct.calcsize(CAR_STATUS_FMT)  # 59
 
-# Car Setup: see spec lines 448-473. 50 bytes per car. We only read m_onThrottle
-# (index 2) and m_brakeBias (index 15); the rest is aero/suspension/tyre setup.
-CAR_SETUP_FMT = "<4B4f9B4fBf"
-CAR_SETUP_SIZE = struct.calcsize(CAR_SETUP_FMT)  # 50
+# Car Telemetry 2 (new in 2026): see spec struct CarTelemetry2Data (line 900).
+# activeAeroMode(B) activeAeroAvailable(B) activeAeroActivationDistance(H)
+# overtakeAvailable(B) overtakeActive(B) overtakeActivationDistance(H)
+# 2026Regulations(B) drivingWrongWay(B). 10 bytes per car.
+# Packet: 29 + 24 * 10 = 269 bytes.
+CAR_TELEMETRY2_FMT = "<BBHBBHBB"
+CAR_TELEMETRY2_SIZE = struct.calcsize(CAR_TELEMETRY2_FMT)  # 10
 
-# Participants: 7 uint8 + 32s name + 2 uint8 + uint16 + 2 uint8 + 12 uint8.
-PARTICIPANT_DATA_FMT = "<7B32s2BH2B12B"
-PARTICIPANT_DATA_SIZE = struct.calcsize(PARTICIPANT_DATA_FMT)  # 57
+# Participants: aiControlled(B), driverId/networkId/teamId (H each — widened
+# from uint8 in 2026), myTeam/raceNumber/nationality (B), 32s name,
+# yourTelemetry/showOnlineNames (B), techLevel(H), platform/numColours (B),
+# 12 uint8 livery. 60 bytes. Packet: 29 + 1 + 24 * 60 = 1470 bytes.
+PARTICIPANT_DATA_FMT = "<B3H3B32s2BH2B12B"
+PARTICIPANT_DATA_SIZE = struct.calcsize(PARTICIPANT_DATA_FMT)  # 60
 
 # Session packet, pre-marshal-zone block only (where total laps / type / track
-# live). weather(B) trackTemp(b) airTemp(b) totalLaps(B) trackLength(H)
+# id live). weather(B) trackTemp(b) airTemp(b) totalLaps(B) trackLength(H)
 # sessionType(B) trackId(b) formula(B) timeLeft(H) duration(H) pitLimit(B)
 # paused(B) spectating(B) spectatorIdx(B) sliPro(B) numMarshalZones(B).
+# 2026 grew the packet to 926 bytes, but only by appending the active-aero/DRS
+# zones and assist settings at the end — every offset we read is unchanged.
 SESSION_PRE_FMT = "<BbbBHBbBHHBBBBBB"
+SESSION_PACKET_SIZE = 926
 
 # After the pre-marshal block comes a fixed array of 21 MarshalZones (each a
-# float zoneStart + int8 zoneFlag), then m_safetyCarStatus. zoneFlag: -1=invalid,
-# 0=none, 1=green, 2=blue, 3=yellow. safetyCarStatus: 0=none, 1=full, 2=virtual.
+# float zoneStart + int8 zoneFlag), then m_safetyCarStatus (0=none, 1=full,
+# 2=virtual, 3=formation lap). We skip the zones; their size is needed to find
+# the SC status.
 MARSHAL_ZONE_FMT = "<fb"
 MARSHAL_ZONE_SIZE = struct.calcsize(MARSHAL_ZONE_FMT)  # 5
 MAX_MARSHAL_ZONES = 21
 
 # After the marshal zones + safetyCarStatus comes networkGame(B),
-# numWeatherForecastSamples(B), then that many WeatherForecastSamples. Each is
+# numWeatherForecastSamples(B), then a fixed array of 64 WeatherForecastSamples
+# (the first numWeatherForecastSamples are valid). Each is
 # sessionType(B) timeOffset(B) weather(B) trackTemp(b) trackTempChange(b)
 # airTemp(b) airTempChange(b) rainPct(B) = 8 bytes.
 WEATHER_SAMPLE_FMT = "<BBBbbbbB"
 WEATHER_SAMPLE_SIZE = struct.calcsize(WEATHER_SAMPLE_FMT)  # 8
+MAX_WEATHER_SAMPLES = 64
 WEATHER_TYPES = {0: "Clear", 1: "Light cloud", 2: "Overcast",
                  3: "Light rain", 4: "Heavy rain", 5: "Storm"}
 
 # Car Damage (packet 10): m_tyresWear[4] (float %) then 30 uint8 damage fields.
-# We read tyre wear (0-3) and the two front-wing values (16, 17).
+# We read tyre wear (0-3) and the two front-wing values (16, 17). Unchanged
+# from 2025. Packet: 29 + 24 * 46 = 1133 bytes.
 CAR_DAMAGE_FMT = "<4f30B"
 CAR_DAMAGE_SIZE = struct.calcsize(CAR_DAMAGE_FMT)  # 46
-
-# Session History (packet 11, one car per packet, 1460 bytes). Fixed-size arrays:
-# 100 lap-history entries followed by 8 tyre-stint slots. We only need the
-# best-lap lap number and the tyre stints, so we skip over the lap array.
-SESSION_HISTORY_HEAD_FMT = "<7B"  # carIdx, numLaps, numTyreStints, best{Lap,S1,S2,S3}LapNum
-LAP_HISTORY_FMT = "<IHBHBHBB"     # one lap entry
-LAP_HISTORY_SIZE = struct.calcsize(LAP_HISTORY_FMT)  # 14
-NUM_LAPS_IN_HISTORY = 100
-TYRE_STINT_FMT = "<3B"            # endLap (255=current), actualCompound, visualCompound
-TYRE_STINT_SIZE = struct.calcsize(TYRE_STINT_FMT)  # 3
-MAX_TYRE_STINTS = 8
 
 # Packet IDs (subset we consume).
 PACKET_SESSION = 1
 PACKET_LAP = 2
 PACKET_EVENT = 3
 PACKET_PARTICIPANTS = 4
-PACKET_CAR_SETUPS = 5
-PACKET_CAR_TELEMETRY = 6
-PACKET_CAR_DAMAGE = 10
 PACKET_CAR_STATUS = 7
-PACKET_SESSION_HISTORY = 11
+PACKET_CAR_DAMAGE = 10
+PACKET_CAR_TELEMETRY2 = 16
 
-NUM_CARS = 22
+NUM_CARS = 24  # cs_maxNumCarsInUDPData (22 -> 24 in 2026 for the eleventh team)
 
 # --- Reference data ----------------------------------------------------------
-# F1 2025 team ids (0-9) → name + broadcast livery colour.
-TEAMS = {
-    0: ("Mercedes", "#27F4D2"),
-    1: ("Ferrari", "#E8002D"),
-    2: ("Red Bull", "#3671C6"),
-    3: ("Williams", "#64C4FF"),
-    4: ("Aston Martin", "#229971"),
-    5: ("Alpine", "#00A1E8"),
-    6: ("Racing Bulls", "#6692FF"),
-    7: ("Haas", "#B6BABD"),
-    8: ("McLaren", "#FF8000"),
-    9: ("Kick Sauber", "#52E252"),
-}
-DEFAULT_TEAM = ("F1", "#999999")
-
-# Visual tyre compound → (short label, colour).
-TYRES = {
-    16: ("S", "#E8002D"),   # soft
-    17: ("M", "#FFD12E"),   # medium
-    18: ("H", "#EBEBEB"),   # hard
-    7: ("I", "#43B02A"),    # intermediate
-    8: ("W", "#0067AD"),    # wet
-}
-DEFAULT_TYRE = ("?", "#666666")
-
-# track id → display name (unknown ids fall back to "Track <id>"). Ids verified
-# against the sibling F1 25 parsers; 33 (Madrid) is provisional.
-TRACKS = {
-    0: "Melbourne", 1: "Paul Ricard", 2: "Shanghai", 3: "Bahrain",
-    4: "Catalunya", 5: "Monaco", 6: "Montreal", 7: "Silverstone",
-    8: "Hockenheim", 9: "Hungaroring", 10: "Spa", 11: "Monza",
-    12: "Singapore", 13: "Suzuka", 14: "Abu Dhabi", 15: "COTA",
-    16: "Interlagos", 17: "Red Bull Ring", 18: "Sochi", 19: "Mexico",
-    20: "Baku", 21: "Sakhir Short", 22: "Silverstone Short", 23: "COTA Short",
-    24: "Suzuka Short", 25: "Hanoi", 26: "Zandvoort", 27: "Imola",
-    28: "Portimao", 29: "Jeddah", 30: "Miami", 31: "Las Vegas", 32: "Losail",
-    33: "Madrid",
-}
-
-# F1 25 session-type ids (per the appendix). Note this differs from the pre-2023
-# layout: Sprint-shootout/qualifying sits at 10-14 and Race moved to 15-17, with
-# Time Trial at 18. Verified against the sibling F1 25 parsers.
+# Session-type ids (per the appendix; unchanged in 2026). Note this differs from
+# the pre-2023 layout: Sprint-shootout/qualifying sits at 10-14 and Race moved to
+# 15-17, with Time Trial at 18.
 SESSION_TYPES = {
     0: "Unknown", 1: "P1", 2: "P2", 3: "P3", 4: "Short Practice",
     5: "Q1", 6: "Q2", 7: "Q3", 8: "Short Quali", 9: "One-Shot Quali",
@@ -143,73 +109,13 @@ SESSION_TYPES = {
     15: "Race", 16: "Race 2", 17: "Race 3", 18: "Time Trial",
 }
 
-# LapData.m_resultStatus → broadcast label for cars out of the race. Per the
-# F1 25 spec: 0=invalid, 1=inactive, 2=active, 3=finished, 4=didnotfinish,
-# 5=disqualified, 6=not classified, 7=retired. Active/finished race normally
-# (no label); the rest get a status label and are greyed out in the tower.
-RESULT_LABELS = {
-    1: "DNS",   # inactive — took no part
-    4: "DNF",   # did not finish
-    5: "DSQ",   # disqualified
-    6: "NC",    # not classified
-    7: "DNF",   # retired
-}
-
-RESULT_FINISHED = 3  # m_resultStatus: completed the race (gets a finish flag)
-
-# m_driverStatus values (0=in garage, 1=flying lap, 2=in lap, 3=out lap,
-# 4=on track). The out-lap state drives the quali "Out lap" label.
-DRIVER_STATUS_OUT_LAP = 3
-
 # ERS energy store is capped at 4 MJ (F1 regs); m_ersStoreEnergy is in Joules,
 # so battery % = energy / ERS_MAX_J * 100.
 ERS_MAX_J = 4_000_000.0
 
 
-def result_label(result_status):
-    """Out-of-race label (DNF/DSQ/DNS/NC), or None when racing/finished."""
-    return RESULT_LABELS.get(result_status)
-
-
-def team_info(team_id):
-    return TEAMS.get(team_id, DEFAULT_TEAM)
-
-
-def team_logo(team_id):
-    """Logo filename under web/teams/ for a team, or None when unknown.
-    The slug is the in-game team name lower-cased with spaces removed
-    (e.g. "Aston Martin" -> "astonmartin", "Kick Sauber" -> "kicksauber"),
-    matching the renamed files in web/teams/."""
-    if team_id not in TEAMS:
-        return None
-    return TEAMS[team_id][0].lower().replace(" ", "") + ".png"
-
-
-def tyre_info(visual_compound):
-    return TYRES.get(visual_compound, DEFAULT_TYRE)
-
-
-def track_name(track_id):
-    return TRACKS.get(track_id, f"Track {track_id}")
-
-
 def session_type_name(session_type):
     return SESSION_TYPES.get(session_type, f"Session {session_type}")
-
-
-# Which header info to show per session type: races show a lap counter; the
-# timed knock-out sessions (normal qualifying 5-9 and sprint qualifying 10-14)
-# show a countdown; everything else (practice, time trial…) shows nothing.
-RACE_SESSIONS = {15, 16, 17}
-QUALI_SESSIONS = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
-
-
-def session_info_kind(session_type):
-    if session_type in RACE_SESSIONS:
-        return "race"
-    if session_type in QUALI_SESSIONS:
-        return "quali"
-    return "none"
 
 
 def parse_header(data):
@@ -223,20 +129,18 @@ def parse_header(data):
     }
 
 
-def parse_car_telemetry(data):
+def parse_car_telemetry2(data):
+    """Per-car 2026-regulation state. Overtake Mode lives here — NOT in Car
+    Status m_ersDeployMode, whose value 3 is the unrelated "boost" deploy mode."""
     out = []
     offset = HEADER_SIZE
     for _ in range(NUM_CARS):
-        t = struct.unpack_from(CAR_TELEMETRY_FMT, data, offset)
+        t = struct.unpack_from(CAR_TELEMETRY2_FMT, data, offset)
         out.append({
-            "speed": t[0],
-            "throttle": t[1],  # 0.0..1.0
-            "brake": t[3],     # 0.0..1.0
-            "gear": t[5],
-            "rpm": t[6],
-            "drs": t[7],  # 0 = off, 1 = on
+            "overtake_available": t[3],   # m_overtakeAvailable: 0 = no, 1 = yes
+            "overtake_active": t[4],      # m_overtakeActive: 0 = no, 1 = yes
         })
-        offset += CAR_TELEMETRY_SIZE
+        offset += CAR_TELEMETRY2_SIZE
     return out
 
 
@@ -247,25 +151,21 @@ def parse_lap(data):
         l = struct.unpack_from(LAP_DATA_FMT, data, offset)
         out.append({
             "last_lap_ms": l[0],
-            "current_lap_ms": l[1],
             # Sector/delta times split as (msPart:H, minutesPart:B) to allow
             # values over 65s. Recombine to a single ms figure.
             "sector1_ms": l[3] * 60000 + l[2],   # this lap's S1 (0 until crossed)
             "sector2_ms": l[5] * 60000 + l[4],   # this lap's S2 (0 until crossed)
-            "interval_to_front_ms": l[7] * 60000 + l[6],
             "gap_to_leader_ms": l[9] * 60000 + l[8],
             "lap_distance": l[10],
             "position": l[13],
             "lap_num": l[14],
             "pit_status": l[15],          # 0 none, 1 pitting, 2 in pit area
             "sector": l[17],             # 0 = S1, 1 = S2, 2 = S3
-            "lap_invalid": l[18],         # 0 = valid, 1 = current lap invalidated
             "penalties_sec": l[19],       # accumulated time penalty (seconds)
             "drive_through": l[22],       # unserved drive-through penalties
-            "unserved_sg": l[23],         # unserved stop-go penalties (info block)
+            "unserved_sg": l[23],         # unserved stop-go penalties
             "total_distance": l[11],      # total race distance (m), for lap-down math
             "should_serve_pen": l[30],    # m_pitStopShouldServePen (pit projection)
-            "driver_status": l[25],       # 3 = out lap (see DRIVER_STATUS_OUT_LAP)
             "result_status": l[26],
         })
         offset += LAP_DATA_SIZE
@@ -278,28 +178,12 @@ def parse_car_status(data):
     for _ in range(NUM_CARS):
         s = struct.unpack_from(CAR_STATUS_FMT, data, offset)
         out.append({
-            "front_brake_bias": s[3],     # live brake bias % (front), MFD-adjustable
-            "fuel_in_tank": s[5],
-            "drs_allowed": s[11],
             "visual_tyre": s[14],
             "tyre_age_laps": s[15],
             "ers_energy_j": s[19],        # ERS store in Joules (max ERS_MAX_J)
-            "ers_deploy_mode": s[20],     # 0 none, 1 medium, 2 hotlap, 3 overtake
+            "ers_deploy_mode": s[20],     # 0 none, 1 medium, 2 hotlap, 3 boost
         })
         offset += CAR_STATUS_SIZE
-    return out
-
-
-def parse_car_setups(data):
-    out = []
-    offset = HEADER_SIZE
-    for _ in range(NUM_CARS):
-        s = struct.unpack_from(CAR_SETUP_FMT, data, offset)
-        out.append({
-            "on_throttle_diff": s[2],     # on-throttle differential % (100 = locked)
-            "brake_bias": s[15],          # setup brake bias % (front)
-        })
-        offset += CAR_SETUP_SIZE
     return out
 
 
@@ -310,8 +194,6 @@ def parse_participants(data):
         p = struct.unpack_from(PARTICIPANT_DATA_FMT, data, offset)
         name = p[7].split(b"\x00", 1)[0].decode("utf-8", errors="replace").strip()
         out.append({
-            "ai_controlled": p[0],   # 1 = AI bot, 0 = human (multiplayer) player
-            "team_id": p[3],
             "race_number": p[5],
             "name": name,
         })
@@ -319,20 +201,9 @@ def parse_participants(data):
     return out
 
 
-def parse_num_active_cars(data):
-    return struct.unpack_from("<B", data, HEADER_SIZE)[0]
-
-
 def parse_session(data):
     s = struct.unpack_from(SESSION_PRE_FMT, data, HEADER_SIZE)
-    num_zones = min(s[15], MAX_MARSHAL_ZONES)
     zones_off = HEADER_SIZE + struct.calcsize(SESSION_PRE_FMT)
-    marshal_yellow = False
-    for i in range(num_zones):
-        _, zflag = struct.unpack_from(MARSHAL_ZONE_FMT, data, zones_off + i * MARSHAL_ZONE_SIZE)
-        if zflag == 3:  # yellow
-            marshal_yellow = True
-            break
     sc_off = zones_off + MAX_MARSHAL_ZONES * MARSHAL_ZONE_SIZE
     safety_car_status = struct.unpack_from("<B", data, sc_off)[0]
     # safetyCarStatus(B), networkGame(B), numWeatherForecastSamples(B), then the
@@ -341,7 +212,7 @@ def parse_session(data):
     try:
         num_samples = struct.unpack_from("<B", data, sc_off + 2)[0]
         w_off = sc_off + 3
-        for _ in range(min(num_samples, 64)):
+        for _ in range(min(num_samples, MAX_WEATHER_SAMPLES)):
             if w_off + WEATHER_SAMPLE_SIZE > len(data):
                 break
             w = struct.unpack_from(WEATHER_SAMPLE_FMT, data, w_off)
@@ -357,12 +228,8 @@ def parse_session(data):
         "total_laps": s[3],
         "track_length_m": s[4],
         "session_type": s[5],
-        "session_type_name": session_type_name(s[5]),
         "track_id": s[6],
-        "track_name": track_name(s[6]),
-        "session_time_left": s[8],   # seconds remaining (quali countdown)
-        "marshal_yellow": marshal_yellow,
-        "safety_car_status": safety_car_status,  # 0 none, 1 full SC, 2 VSC
+        "safety_car_status": safety_car_status,  # 0 none, 1 full SC, 2 VSC, 3 formation lap
         "weather_forecast": weather_forecast,
         # Spectator state: who's being watched. m_playerCarIndex is meaningless
         # while spectating, so the spectated index is the authoritative "active
@@ -374,15 +241,10 @@ def parse_session(data):
 
 def parse_event(data):
     """Event packet: a 4-char code plus a type-specific detail union. We only
-    decode the safety-car event ("SCAR"), whose detail is safetyCarType +
-    eventType (0 Deployed, 1 Returning, 2 Returned, 3 Resume Race)."""
+    decode the button-status event ("BUTN")."""
     code = bytes(data[HEADER_SIZE:HEADER_SIZE + 4]).decode("ascii", errors="replace")
     out = {"code": code}
-    if code == "SCAR":
-        sc_type, event_type = struct.unpack_from("<BB", data, HEADER_SIZE + 4)
-        out["safety_car_type"] = sc_type
-        out["safety_car_event"] = event_type
-    elif code == "BUTN":
+    if code == "BUTN":
         # Button-status event: a 32-bit bitmask of currently-pressed buttons.
         # Used to flip the info overlay's pages via bound UDP Actions.
         out["buttons"] = struct.unpack_from("<I", data, HEADER_SIZE + 4)[0]
@@ -408,63 +270,3 @@ def parse_car_damage(data):
         })
         offset += CAR_DAMAGE_SIZE
     return out
-
-
-def _hist_lap_sectors(data, laps_off, lap_num):
-    """The three sector times (ms) of a 1-based lap in a session-history array,
-    or (0, 0, 0) if the lap number is out of range. Each sector is stored split
-    as (msPart:H, minutesPart:B) so values over 65s fit; recombine to ms."""
-    if not (0 < lap_num <= NUM_LAPS_IN_HISTORY):
-        return (0, 0, 0)
-    lp = struct.unpack_from(LAP_HISTORY_FMT, data, laps_off + (lap_num - 1) * LAP_HISTORY_SIZE)
-    return (lp[2] * 60000 + lp[1], lp[4] * 60000 + lp[3], lp[6] * 60000 + lp[5])
-
-
-def parse_session_history(data):
-    """One car's lap/tyre history. We keep the best-lap number/time and its three
-    sector splits (for the live sector panel's reference time), each sector's
-    personal-best time and the lap it was set on (for sector colouring — the
-    game only records valid sectors here, so invalid laps are excluded for
-    free), and the tyre stints (the compound used on the fastest lap)."""
-    h = struct.unpack_from(SESSION_HISTORY_HEAD_FMT, data, HEADER_SIZE)
-    laps_off = HEADER_SIZE + 7
-    num_stints = min(h[2], MAX_TYRE_STINTS)
-    stints_off = laps_off + NUM_LAPS_IN_HISTORY * LAP_HISTORY_SIZE
-    stints = []
-    for i in range(num_stints):
-        s = struct.unpack_from(TYRE_STINT_FMT, data, stints_off + i * TYRE_STINT_SIZE)
-        stints.append({"end_lap": s[0], "visual": s[2]})
-    # Time (ms) + sector splits of the fastest lap (first field of its entry).
-    best_lap_num = h[3]   # 0 if no lap set yet; otherwise 1-based
-    best_lap_time_ms = 0
-    if 0 < best_lap_num <= NUM_LAPS_IN_HISTORY:
-        best_lap_time_ms = struct.unpack_from(LAP_HISTORY_FMT, data,
-                                              laps_off + (best_lap_num - 1) * LAP_HISTORY_SIZE)[0]
-    best_lap_sectors = _hist_lap_sectors(data, laps_off, best_lap_num)
-    # Per-sector personal bests: m_bestSector{1,2,3}LapNum point at the lap each
-    # was set on; pull that sector's time out of the matching lap entry.
-    best_sector_laps = (h[4], h[5], h[6])
-    best_sectors = tuple(
-        _hist_lap_sectors(data, laps_off, ln)[i] for i, ln in enumerate(best_sector_laps)
-    )
-    return {
-        "car_idx": h[0],
-        "best_lap_num": best_lap_num,
-        "best_lap_time_ms": best_lap_time_ms,
-        "best_lap_sectors_ms": best_lap_sectors,   # (s1, s2, s3) of the fastest lap
-        "best_sectors_ms": best_sectors,           # (s1, s2, s3) personal bests
-        "best_sector_laps": best_sector_laps,      # lap each personal-best sector was set on
-        "tyre_stints": stints,
-    }
-
-
-def fastest_lap_tyre(best_lap_num, tyre_stints):
-    """Visual compound id the fastest lap was set on, or None if unknown. The
-    stint covering the best lap is the first whose end_lap reaches it (the
-    current stint uses end_lap 255, so it covers any lap)."""
-    if not best_lap_num:
-        return None
-    for stint in tyre_stints:
-        if stint["end_lap"] >= best_lap_num:
-            return stint["visual"]
-    return None

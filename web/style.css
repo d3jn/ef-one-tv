@@ -1,16 +1,14 @@
 /* ef-one-tv broadcast graphics.
-   Everything lives on a fixed 1920×1080 #stage that is scaled to fit the
-   window, so the layout is resolution-independent and OBS-ready. */
+   The overlay lives on a fixed design surface (#stage) sized to its block and
+   scaled to fit the window, so the layout is resolution-independent and
+   OBS-ready. */
 
 :root {
-  --bg: #0a0e14;
   --panel: rgba(12, 16, 24, 0.86);
   --panel-row: rgba(20, 26, 38, 0.82);
-  --panel-row-alt: rgba(28, 36, 52, 0.82);
   --ink: #f4f7fb;
   --ink-dim: #9fb0c3;
   --accent: #e10600;
-  --row-h: 40px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -37,427 +35,6 @@ html, body {
   transform-origin: center center;
 }
 
-/* --- Top bar --- */
-/* Header sits directly above the tower; same width, separated by a gap as
-   thick as the blocks' border-radius. */
-#panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 430px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px; /* == border-radius of the blocks */
-}
-
-#topbar {
-  position: relative; /* anchors the flag tab that sticks out to the right */
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 16px;
-  height: 52px;
-  background: var(--panel);
-  border-radius: 8px;
-  /* No backdrop-filter: blurring the backdrop is re-rasterized on every repaint
-     (CPU-side in OBS's GPU-less CEF). The translucent --panel fill carries the
-     look on its own. Shadow kept small-radius so it's cheap to paint. */
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-}
-
-/* Session-flag tab: extends the header to the right. Slides in left→right when
-   shown and back out right→left when hidden (same idiom as the penalty board).
-   Yellow states (YELLOW FLAG / VSC / SC) vs green (GREEN FLAG on resume). */
-#flag-block {
-  position: absolute;
-  left: 100%;
-  top: 0;
-  height: 100%;
-  margin-left: 8px; /* == header border-radius, matching the panel gap */
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  border-radius: 8px;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 1.5px;
-  white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  transform: translateX(-20px); /* hidden: tucked left + faded */
-  opacity: 0;
-  pointer-events: none;
-  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease;
-}
-#flag-block.show { transform: translateX(0); opacity: 1; }
-#flag-block.yellow { background: #ffd400; color: #0a0e14; }
-#flag-block.green { background: #18b84e; color: #ffffff; }
-
-.f1-mark {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 800;
-  font-size: 20px;
-  letter-spacing: 1px;
-  padding: 4px 11px;
-  border-radius: 5px;
-}
-
-.session-meta { font-size: 17px; color: var(--ink-dim); letter-spacing: 1px; }
-.session-meta .sep { margin: 0 9px; opacity: 0.4; }
-#track { color: var(--ink); font-weight: 600; }
-
-/* Session info (lap counter / quali countdown), pushed to the right. */
-#session-info {
-  margin-left: auto;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: var(--ink-dim);
-}
-#session-info.hidden { display: none; }
-#session-info .n { color: var(--ink); }
-
-/* --- Timing tower --- */
-#tower {
-  position: relative; /* anchors the absolutely-positioned rows */
-  width: 100%;
-  background: var(--panel);
-  border-radius: 8px;
-  /* overflow stays visible so penalty boards can stick out past the right
-     edge; the rounded corners are instead applied to the top/bottom rows. */
-  /* No backdrop-filter (see #topbar): too costly to re-rasterize as the tower
-     repaints. Small-radius shadow for cheap depth. */
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);
-}
-
-#tower-rows { list-style: none; }
-
-/* Each row. position:absolute + a translateY transition is what gives the
-   smooth "TV" reorder when cars swap places (see app.js layoutRows). */
-.row {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: var(--row-h);
-  display: grid;
-  grid-template-columns: 46px 1fr 96px;
-  align-items: center;
-  padding: 0 12px 0 0;
-  background: var(--panel-row);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
-  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
-              opacity 0.35s ease;
-  will-change: transform;
-}
-.row:nth-child(even) { background: var(--panel-row-alt); }
-.row.player { background: rgba(225, 6, 0, 0.18); }
-/* Round the visual top/bottom rows so the tower keeps its corners without
-   clipping overflow (rank-tagged in JS, since rows reorder via transform). */
-.row.top { border-top-left-radius: 8px; border-top-right-radius: 8px; }
-.row.bottom { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
-/* Drivers out of the race (DNF/DSQ/DNS/NC) — greyed out in the standings. */
-.row.retired { opacity: 0.45; filter: grayscale(1); }
-.row.entering { opacity: 0; }
-
-/* Current fastest lap (race only): F1's purple. A row tint plus a purple accent
-   bar in place of the team colour, so the holder reads at a glance. Listed after
-   the .player/even rules (equal specificity) so it wins when they overlap; the
-   :nth-child variant outranks the alternating-row tint. */
-.row.fastest,
-.row.fastest:nth-child(even),
-.row.fastest.player { background: rgba(160, 32, 240, 0.26); }
-.row.fastest .pos::before {
-  background: #b026ff;
-  box-shadow: 0 0 10px rgba(176, 38, 255, 0.85);
-}
-
-/* Position cell with team-colour accent bar. Scoped to .row so this (and its
-   ::before bar) can't leak onto other blocks that also use a .pos class. */
-.row .pos {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  font-size: 18px;
-  font-weight: 800;
-}
-.row .pos::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 5px;
-  background: var(--team, #888);
-}
-/* Active driver (the player, or the spectated car): solid red position square
-   with a white number, so the watched car stands out at a glance. */
-.row.player .pos { background: var(--accent); color: #fff; }
-
-.driver { display: flex; align-items: center; gap: 9px; padding-left: 10px; min-width: 0; }
-/* Team logo before the driver name. */
-.logo { width: 24px; height: 24px; object-fit: contain; flex: 0 0 auto; }
-.logo.hidden, .logo:not([src]), .logo[src=""] { display: none; }
-/* Long multiplayer handles truncate with an ellipsis rather than overflow. */
-.code {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  white-space: nowrap;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* DRS pill */
-.drs {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  padding: 2px 5px;
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: var(--ink-dim);
-  flex: 0 0 auto;
-}
-.drs.hidden { display: none; }
-.drs.on {
-  color: #001b0a;
-  background: #00e676;
-  border-color: #00e676;
-  box-shadow: 0 0 10px rgba(0, 230, 118, 0.6);
-}
-
-.gap {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-}
-/* Value column: the metric, then the persistent tyre letter on the far right. */
-.gap .val { display: inline-flex; align-items: center; justify-content: flex-end; gap: 9px; }
-/* Only the metric slides/fades on mode change (see switchMode). */
-.val-main { will-change: transform, opacity; }
-/* Tyre compound: bold, colour-coded letter (colour set inline per compound).
-   Collapses when empty (PIT / out-of-race) so the label sits flush right. */
-.tyre-letter { font-weight: 800; min-width: 13px; text-align: center; }
-.tyre-letter:empty { display: none; }
-.gap.leader .val-main { color: var(--accent); font-weight: 800; }
-.gap .pit {
-  color: #ffd12e;
-  font-weight: 800;
-  letter-spacing: 1px;
-}
-/* DNF/DSQ/DNS/NC label (row is already greyed; keep the text bold). */
-.status-out { font-weight: 800; letter-spacing: 1px; color: var(--ink-dim); }
-/* Quali placeholders in the gap column ("No time" / "Out lap") — dimmed so they
-   read as a state, not a value. */
-.val-note { color: var(--ink-dim); font-weight: 600; }
-
-/* --- Live sector-timing block (qualifying only) --------------------------- */
-/* Three stacked sections: a driver heading underlined by the team colour, a big
-   running lap clock with the fastest-lap reference beside it, and the three
-   sector segments coloured gray/yellow/green/purple. Positioned from config
-   (px from the stage's top-left); the default is bottom-centre. */
-#sector-panel {
-  /* Pinned flush to the top-left corner of its own stage (served standalone at
-     /quali_lap_sectors); no configurable position. */
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 360px;
-  background: var(--panel);
-  border-radius: 8px;
-  overflow: hidden; /* clip the team-colour underline to the rounded corners */
-  /* No backdrop-filter: the live lap clock repaints this panel every tick, so a
-     blurred backdrop would be re-rasterized 20×/s (CPU-side under OBS's CEF).
-     Small-radius shadow keeps depth cheaply. */
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);
-  opacity: 1;
-  transition: opacity 0.35s ease; /* same fade as the standings rows */
-}
-#sector-panel.hidden { opacity: 0; }
-
-/* Inputs trace (throttle/brake) — served standalone at /inputs. Pinned flush to
-   the top-left of its own stage, like the other blocks. 10px padding frames the
-   460×100 canvas inside the 480×120 footprint. */
-#inputs-panel {
-  position: absolute;
-  left: 0;
-  top: 0;
-  padding: 10px;
-  background: var(--panel);
-  border-radius: 8px;
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);  /* small-radius: cheap to paint */
-  /* NO backdrop-filter here (like the other panels): the canvas repaints
-     continuously, so a blurred backdrop would be re-rasterized every frame —
-     on the CPU under OBS's GPU-less CEF — and pegs a core. The opaque-ish
-     --panel fill reads fine over gameplay without it. */
-  line-height: 0; /* no descender gap under the inline canvas */
-}
-#inputs-canvas {
-  display: block;
-  /* Own compositing layer so the live canvas repaints don't invalidate the
-     panel's background/shadow raster behind it. */
-  will-change: transform;
-}
-
-/* Status pills above the trace. line-height: normal undoes the panel's
-   line-height: 0 (which only exists to kill the canvas descender gap). */
-.inputs-pills {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-  line-height: normal;
-}
-.pill {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #fff;                       /* every pill is white text on a dark fill */
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums; /* steady width as RPM/% change */
-}
-.pill-rpm  { background: #15457e; margin-left: auto; }  /* blue; pushed to the right edge */
-.pill-bb   { background: #4a2a7a; }  /* violet */
-.pill-diff { background: #5c3a1e; }  /* brown */
-/* ERS deploy mode — darkened so white text stays legible. */
-.pill-ers.ers-none     { background: #464b54; }  /* gray */
-.pill-ers.ers-medium   { background: #a8870c; }  /* dark yellow */
-.pill-ers.ers-hotlap   { background: #b5560a; }  /* dark orange */
-.pill-ers.ers-overtake { background: #9a1f1f; }  /* dark red */
-
-.sec-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: 34px;
-  padding: 0 12px;
-  border-bottom: 3px solid var(--team, #888);
-}
-.sec-pos { font-size: 18px; font-weight: 800; min-width: 18px; }
-.sec-logo { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto; }
-.sec-logo.hidden, .sec-logo:not([src]), .sec-logo[src=""] { display: none; }
-.sec-name {
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sec-tyre { font-size: 18px; font-weight: 800; margin-left: auto; flex: 0 0 auto; }
-
-.sec-main {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  padding: 7px 14px 9px;
-}
-/* Clock area: the running lap time, replaced for ~2s at each crossing by the
-   frozen crossing time + a coloured delta. The swap is instant (no transitions);
-   only one of the two is shown at a time via display. */
-.sec-clock { display: inline-flex; align-items: baseline; }
-.sec-time,
-#sec-delta-time,
-#sec-delta-gap {
-  font-size: 34px;
-  font-weight: 800;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.sec-delta { display: none; align-items: baseline; gap: 10px; white-space: nowrap; }
-/* During the flash: hide the live clock, show the frozen time + delta. */
-.sec-clock.flashing .sec-time { display: none; }
-.sec-clock.flashing .sec-delta { display: inline-flex; }
-#sec-delta-gap.faster { color: #2ecc40; }
-#sec-delta-gap.slower { color: #ffd400; }
-.sec-ref {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  text-align: right;
-  line-height: 1.15;
-}
-.sec-ref.hidden { visibility: hidden; } /* keep the block's height steady */
-.sec-ref-time { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.sec-ref-name { font-size: 12px; font-weight: 600; letter-spacing: 0.5px; color: var(--ink-dim); }
-
-.sec-bottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 12px 10px; }
-.seg {
-  position: relative;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  padding-bottom: 8px;
-}
-/* Colour-coded underline bar; both label and bar take the segment's colour. */
-.seg::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 4px;
-  border-radius: 2px;
-  background: currentColor;
-}
-.seg.gray { color: #5b6675; }
-.seg.yellow { color: #ffd400; }
-.seg.green { color: #2ecc40; }
-.seg.purple { color: #b026ff; }
-
-/* Penalty board: a black tab that sticks out past the row's right edge, shown
-   only for drivers carrying unserved penalties. Holds the accumulated time
-   penalty ("+3") and/or a DT tag for an unserved drive-through. */
-.penalty {
-  position: absolute;
-  left: 100%;
-  top: 50%;
-  /* Resting (hidden) state: nudged left and faded out. Toggling .show slides it
-     right into place; removing .show slides it back left — a simple in/out. */
-  transform: translate(-18px, -50%);
-  margin-left: 6px;
-  display: inline-flex; /* always laid out; visibility is driven by opacity */
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 9px;
-  background: #000;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: #fff;
-  white-space: nowrap;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
-  opacity: 0;
-  pointer-events: none;
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-              opacity 0.22s ease;
-}
-.penalty.show { transform: translate(0, -50%); opacity: 1; }
-/* Finish flag fills the block height, keeping its portrait aspect ratio. */
-.finish-flag { height: 20px; width: auto; display: block; }
-.pen-time { letter-spacing: 0.5px; }
-/* DT tag: white-on-black inverted so it reads as a distinct chip. */
-.pen-tag {
-  background: #fff;
-  color: #000;
-  border-radius: 3px;
-  padding: 2px 5px;
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
-
-
 /* --- Info overlay (/info): driver companion, 3 pages + ahead/behind header --- */
 #info-panel {
   position: absolute;
@@ -478,7 +55,7 @@ html, body {
           color: var(--accent); padding: 10px 0; }
 
 /* Tyre compound: a single colour-coded letter (S red / M yellow / H white /
-   I green / W blue), coloured by --t — same idiom as the standings tower. */
+   I green / W blue), coloured by --t. */
 .t-letter {
   display: inline-block; min-width: 14px; text-align: center;
   font-size: 15px; font-weight: 800; color: var(--t, #8893a3);
@@ -489,13 +66,30 @@ html, body {
 .wear-mid { color: #e6c93f; }
 .wear-hi { color: #ff5a52; }
 
-/* ERS mode pills (shared look with the inputs block, darker fills) */
+/* ERS mode pills (darkened fills so white text stays legible) */
 .hdr-ers { padding: 1px 7px; border-radius: 4px; font-size: 12px; font-weight: 800; color: #fff; }
 .ers-none { background: #464b54; } .ers-medium { background: #a8870c; }
-.ers-hotlap { background: #b5560a; } .ers-overtake { background: #9a1f1f; }
+.ers-hotlap { background: #b5560a; } .ers-boost { background: #9a1f1f; }
+
+/* Overtake Mode pill (ahead/behind header): lit while the car has it engaged. */
+.ovr {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--ink-dim);
+}
+.ovr.on {
+  color: #001b0a;
+  background: #00e676;
+  border-color: #00e676;
+  box-shadow: 0 0 10px rgba(0, 230, 118, 0.6);
+}
 
 /* Signed gaps in the info block: ahead/faster = blue, behind/slower = red.
-   Named g-pos/g-neg so they don't collide with the tower's .pos position cell. */
+   Named g-pos/g-neg so they don't read as the .pos position cell. */
 .g-neg { color: #6fd3ff; }
 .g-pos { color: #ff8a84; }
 
@@ -530,7 +124,7 @@ html, body {
 .srow .pos { color: var(--ink-dim); font-weight: 800; text-align: center; }
 .srow.me { background: rgba(225,6,0,0.18); border-radius: 4px; }
 .srow .name { font-weight: 800; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.srow .gap { text-align: right; }
+.srow .gap { text-align: right; font-size: 15px; font-weight: 600; }
 .srow .cmp { text-align: center; }
 .srow .wear { text-align: right; }
 .srow .fw { color: #ffb454; font-size: 12px; text-align: right; }

@@ -34,20 +34,23 @@ ACTIVE_SESSION_TYPES = set(range(5, 18))  # quali (5-9), sprint quali (10-14), r
 
 TYRE_CODE = {16: "S", 17: "M", 18: "H", 7: "I", 8: "W"}  # single-letter compounds
 TYRE_NAMES = ["RL", "RR", "FL", "FR"]
-ERS_MODE_NAMES = {0: "None", 1: "Medium", 2: "Hotlap", 3: "Overtake"}
+# m_ersDeployMode. 3 is "boost" in the 2026 format (was "overtake" in 2025) — it is
+# not the 2026 Overtake Mode, which comes from Car Telemetry 2 (see _car_block).
+ERS_MODE_NAMES = {0: "None", 1: "Medium", 2: "Hotlap", 3: "Boost"}
 
 STOP_GO_PENALTY_S = 10
 DRIVE_THROUGH_PENALTY_S = 20
 RACE_START_LAP_DISTANCE_M = 800
 
-# Per-track pit-loss baselines (green / safety car), in seconds, keyed by track_id.
-# Rough real-world estimates; override per-league via settings.json (see config).
+# Per-track pit-loss baselines (green / safety car), in seconds, keyed by track_id
+# (2026 appendix ids). Rough real-world estimates; override per-league via
+# settings.json (see config). Tracks without an estimate (reverse layouts 39-41,
+# Madrid 42) use the -1 default.
 PITSTOP_TIMES = {
-    -1: (21, 14), 0: (19, 13), 1: (21, 14), 2: (21, 14), 3: (22, 15), 4: (21, 14),
-    5: (17, 12), 6: (17, 12), 7: (22, 15), 8: (21, 14), 9: (19, 13), 10: (20, 14),
+    -1: (21, 14), 0: (19, 13), 2: (21, 14), 3: (22, 15), 4: (21, 14),
+    5: (17, 12), 6: (17, 12), 7: (22, 15), 9: (19, 13), 10: (20, 14),
     11: (25, 17), 12: (26, 18), 13: (21, 14), 14: (21, 14), 15: (21, 14), 16: (20, 14),
-    17: (19, 13), 18: (21, 14), 19: (22, 15), 20: (19, 13), 21: (18, 12), 22: (18, 12),
-    23: (18, 12), 24: (18, 12), 25: (21, 14), 26: (17, 12), 27: (27, 18), 28: (21, 14),
+    17: (19, 13), 19: (22, 15), 20: (19, 13), 26: (17, 12), 27: (27, 18),
     29: (17, 12), 30: (19, 13), 31: (19, 13), 32: (21, 14),
 }
 
@@ -533,7 +536,7 @@ class InfoState:
         return leader, ahead, behind
 
     def _car_block(self, game, idx):
-        """tyre/wear/battery/ERS-mode for the ahead/behind header, or None."""
+        """tyre/wear/battery/ERS-mode/overtake for the ahead/behind header, or None."""
         status, damage = game.status[idx], game.damage[idx]
         if not status or not damage:
             return None
@@ -545,7 +548,8 @@ class InfoState:
             "wearCorner": TYRE_NAMES[wear.index(mw)],
             "batteryPct": round(status.get("ers_energy_j", 0) / ERS_MAX_J * 100),
             "ersMode": ERS_MODE_NAMES.get(status.get("ers_deploy_mode", 0), "?"),
-            "drs": bool((game.telemetry[idx] or {}).get("drs", 0)),
+            # 2026 Overtake Mode currently engaged (Car Telemetry 2).
+            "overtake": bool((game.telemetry2[idx] or {}).get("overtake_active", 0)),
         }
 
     def _header(self, game, idx, is_race, retired, race_start):

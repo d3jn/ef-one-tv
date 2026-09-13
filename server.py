@@ -1,9 +1,9 @@
-"""ef-one-tv server: reads F1 25 UDP telemetry and serves broadcast graphics.
+"""ef-one-tv server: reads 2026-format F1 UDP telemetry and serves the info overlay.
 
 One asyncio loop does three jobs:
-  1. Listens for F1 25 UDP packets on UDP_PORT and folds them into GameState.
+  1. Listens for 2026-format UDP packets on UDP_PORT and folds them into GameState.
   2. Serves the static web/ page on http://localhost:HTTP_PORT.
-  3. Pushes the latest broadcast snapshot to every connected browser over a
+  3. Pushes the latest snapshot to every connected browser over a
      WebSocket at PUSH_HZ — decoupled from the (much faster) packet rate so we
      never flood the client.
 
@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
+import f1_packets as fp
 from state import GameState
 
 # All configurable from settings.json (see config.py).
@@ -94,7 +95,7 @@ async def lifespan(app: FastAPI):
         forward_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         forward_sock.setblocking(False)
     task = asyncio.create_task(broadcaster())
-    print(f"Listening for F1 25 telemetry on UDP {UDP_PORT}")
+    print(f"Listening for F1 telemetry (UDP Format {fp.PACKET_FORMAT}) on UDP {UDP_PORT}")
     print(f"Open the graphics at http://{HTTP_HOST}:{HTTP_PORT}")
     if RETRANSMIT_TO:
         print("Retransmitting raw telemetry to "
@@ -132,12 +133,12 @@ async def ws_endpoint(ws: WebSocket):
 # block id (see web/blocks/). They all serve the same generic shell, which
 # resolves the route to a block and mounts it. Add a block by adding its name
 # here and a matching web/blocks/<name>.js module.
-OVERLAY_VIEWS = ["standings", "quali_lap_sectors", "inputs", "info"]
+OVERLAY_VIEWS = ["info"]
 
 
 @app.get("/")
 async def index():
-    # Landing page linking to the overlays (each its own OBS browser source).
+    # Landing page linking to the overlay (its own OBS browser source).
     return FileResponse(WEB_DIR / "index.html")
 
 

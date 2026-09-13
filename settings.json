@@ -3,19 +3,5 @@
   "http_host": "127.0.0.1",
   "http_port": 5000,
   "push_hz": 20,
-  "brand_mark": "F1",
-  "mode_rotation": {
-    "enabled": true,
-    "pools": {
-      "race": ["gap", "interval", "tyre"],
-      "quali": ["gap_quali"],
-      "other": ["gap"]
-    },
-    "durations": {
-      "gap": 50,
-      "interval": 5,
-      "tyre": 5
-    }
-  },
   "retransmit_to": []
 }

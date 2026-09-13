@@ -1,18 +1,20 @@
 # ef-one-tv
 
-Reads **F1 25** UDP telemetry and renders it as TV-style broadcast graphics in
-the browser. A Python server listens for the game's telemetry packets, folds
-them into live session state, and pushes it to a web page over a WebSocket. The
-graphics (a broadcast timing tower) are plain HTML/CSS/JS.
+Reads **F1 25 (2026 Season Pack)** UDP telemetry in the **2026** format and
+renders a driver-info overlay in the browser.
+A Python server listens for the game's telemetry packets, folds them into live
+session state, and pushes it to a web page over a WebSocket. The overlay is
+plain HTML/CSS/JS.
 
 ```
-F1 25 game ──UDP :20777──> server.py ──WebSocket──> browser :5000
-                           parse + merge            HTML/CSS/JS tower
+F1 game ─────UDP :20777──> server.py ──WebSocket──> browser :5000
+                           parse + merge            HTML/CSS/JS overlay
 ```
 
-The F1 25 packets are parsed from scratch in `f1_packets.py` using only Python's
+The 2026-format packets are parsed from scratch in `f1_packets.py` using only Python's
 `struct` module against the official spec in `specs/` — **no third-party
-telemetry library**.
+telemetry library**. Only the 2026 UDP format and 2026-regulation cars are
+supported; packets in any other format (e.g. 2025) are ignored with a warning.
 
 ## Setup
 
@@ -30,14 +32,15 @@ Then open <http://localhost:5000>.
 
 ### Try it without the game (Linux/Mac/any machine)
 
-In a second terminal, send synthetic-but-real F1 25 packets:
+In a second terminal, send synthetic-but-real 2026-format packets:
 
 ```bash
 python mock_sender.py
 ```
 
-You should see a 20-car timing tower that races, swaps positions (with smooth
-sliding rows), pits, and toggles DRS.
+Open <http://localhost:5000/info>: a 22-car 2026 field swaps positions, pits,
+carries penalties, wears its tyres and toggles Overtake Mode, and the overlay
+cycles its three pages every ~8s.
 
 ### Record a real session and replay it
 
@@ -56,38 +59,38 @@ python mock_sender.py --from-file recordings/2026-06-13-1.f1rec
 
 A `.f1rec` file is just length-prefixed, timestamped raw datagrams, so replay is
 byte-for-byte what the game sent — ideal for reproducing session-specific issues.
+Captures made with the game on UDP Format 2025 won't replay: the server only
+accepts 2026-format packets.
 
 ### With the real game
 
-In F1 25: **Settings → Telemetry Settings**
+In F1 25 with the 2026 Season Pack: **Settings → Telemetry Settings**
 - UDP Telemetry: **On**
 - UDP Broadcast Mode: Off (or On if the game is on another PC)
 - IP Address: `127.0.0.1` (same machine) or this machine's LAN IP
 - Port: `20777`
 - UDP Send Rate: 20–60 Hz
-- UDP Format: **2025**
+- UDP Format: **2026**
 
-## Overlays (OBS browser sources)
+## Overlay (OBS browser source)
 
-Each overlay is served on its own route and sized to just its own block, so you
-can add them to **OBS** as separate Browser Sources without a full-screen canvas.
-Set each source to the size below (or any size with the same aspect — the block
-scales to fit); the background is transparent and each block is pinned top-left.
+The overlay is served on its own route and sized to just its own block, so you
+can add it to **OBS** as a Browser Source without a full-screen canvas. Set the
+source to the size below (or any size with the same aspect — the block scales to
+fit); the background is transparent and the block is pinned top-left.
 
 | Route | Browser source size | Shows |
 |-------|--------------------|-------|
-| `/standings` | **660 × 960** | The timing tower (incl. the session-flag tab and penalty/finish tabs that extend right of it; height covers the 22-car maximum). |
-| `/quali_lap_sectors` | **376 × 132** | The live qualifying lap-sector block for the active driver. |
-| `/inputs` | **480 × 150** | A scrolling throttle (green) / brake (red) trace for the active driver (~5s window), with a status-pill row: RPM, ERS mode, brake bias, on-throttle diff. |
 | `/info` | **600 × 640** | The driver-info companion: 3 race pages (live / pit & weather / pace), switched in-game via UDP Actions. See [Info overlay](#info-overlay-driver-companion). |
 
-<http://localhost:5000> is a landing page linking to all of them.
+<http://localhost:5000> is a landing page linking to it.
 
 ### Info overlay (driver companion)
 
 `/info` is a compact in-race companion (ported from the F1 Racing Companion
 overlay) with three pages, plus a persistent ahead/behind header (gap, tyre,
-wear, battery, ERS mode) on every page. It's race-focused — most of it stays
+wear, battery, ERS deploy mode, and an **OVR** pill lit while that car has
+Overtake Mode engaged) on every page. It's race-focused — most of it stays
 hidden in practice/qualifying.
 
 - **Page 1 — Live:** your tyre wear with a laps-left projection (extrapolated to
@@ -126,7 +129,7 @@ Ports and rates live in **`settings.json`** next to the code (loaded by
 
 | Key | Meaning | Default |
 |-----|---------|---------|
-| `udp_port` | F1 25 telemetry UDP port to listen on (must match the game) | `20777` |
+| `udp_port` | Telemetry UDP port to listen on (must match the game) | `20777` |
 | `http_host` | interface the page binds to (`0.0.0.0` to expose on the LAN) | `127.0.0.1` |
 | `http_port` | port the graphics page is served on | `5000` |
 | `push_hz` | snapshots/sec pushed to the browser | `20` |
@@ -157,7 +160,7 @@ Then ship the data files **next to the produced executable**:
 
 ```
 server(.exe)
-web/                 ← the graphics (HTML/CSS/JS, teams/, other/)
+web/                 ← the overlay (HTML/CSS/JS)
 settings.json        ← optional; defaults apply if absent
 driver_names.json    ← optional; no overrides if absent
 ```
@@ -172,29 +175,26 @@ copy next to the exe and falls back to the embedded one.
 
 | File | Role |
 |------|------|
-| `f1_packets.py` | Packet parsers + reference data (teams, tyres, tracks). Pure `struct`. |
-| `state.py` | Merges packet types into one sorted broadcast snapshot. |
+| `f1_packets.py` | Packet parsers + reference data (session types, weather). Pure `struct`. |
+| `state.py` | Merges packet types into live per-car state and builds the snapshot. |
 | `info.py` | Driver-info overlay calc layer: wear/ERS/sector/stint trackers + pit projection. |
 | `server.py` | Async UDP listener + FastAPI WebSocket/static server. |
-| `mock_sender.py` | Emits fake F1 25 packets for offline testing; `--from-file` replays a recording instead. |
+| `mock_sender.py` | Emits fake 2026-format packets for offline testing; `--from-file` replays a recording instead. |
 | `recorder.py` | Captures raw incoming telemetry to `recordings/*.f1rec` for later replay. |
 | `config.py` | Loads `settings.json` (shared by server + mock sender). |
 | `settings.json` | Ports and push rate. |
 | `driver_names.json` | Driver name overrides (source name/number → display name). |
-| `web/` | The broadcast graphics (HTML/CSS/JS). |
-| `specs/` | Official F1 25 UDP structure reference. |
+| `web/` | The overlay (HTML/CSS/JS). |
+| `specs/` | Official 2026 UDP spec: struct layouts (`.txt`) and the full document with ID appendices (`.pdf`). |
 
 ## Notes & next steps
 
-- Each overlay is a transparent surface sized to its own block (see
-  [Overlays](#overlays-obs-browser-sources)), so it drops straight into **OBS**
-  as a Browser Source over gameplay capture.
-- The server pushes snapshots at a fixed **20 Hz** (`PUSH_HZ` in `server.py`),
-  decoupled from the much faster packet rate, so the browser is never flooded.
-- Ports: `UDP_PORT` and `HTTP_PORT` are constants at the top of `server.py`.
-- Easy additions: fastest-lap banner, lower-third driver focus card, mini
-  sector times, track map (from the Motion packet), tyre/fuel widgets. The
-  parsers for most of this data are already in `f1_packets.py`.
-- For richer, timeline-sequenced motion (broadcast wipes, staggered reveals),
-  drop in **GSAP**; the current reorder uses a CSS-transform technique and needs
-  no dependencies.
+- The overlay is a transparent surface sized to its own block (see
+  [Overlay](#overlay-obs-browser-source)), so it drops straight into **OBS** as
+  a Browser Source over gameplay capture.
+- The server pushes snapshots at a fixed rate (`push_hz` in `settings.json`,
+  default 20 Hz), decoupled from the much faster packet rate, so the browser is
+  never flooded.
+- Adding another overlay: write `web/blocks/<name>.js` (it calls
+  `registerBlock`), import it from `web/blocks/index.js`, and add `<name>` to
+  `OVERLAY_VIEWS` in `server.py`.

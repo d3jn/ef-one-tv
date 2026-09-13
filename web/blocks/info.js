@@ -21,7 +21,7 @@ const TEMPLATE = `<div id="info-panel"><div id="info-body"></div></div>`;
 const TYRE_COLOUR = { S: "#e0454b", M: "#e6c93f", H: "#e8eaed",
                       I: "#3fbf57", W: "#3f7fe6", "?": "#8893a3" };
 const ERS_CLASS = { None: "ers-none", Medium: "ers-medium",
-                    Hotlap: "ers-hotlap", Overtake: "ers-overtake" };
+                    Hotlap: "ers-hotlap", Boost: "ers-boost" };
 
 // --- formatters -------------------------------------------------------------
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -61,7 +61,7 @@ function renderHeader(header) {
       <span class="hdr-wear ${wearClass(r.wearPct)}">${r.wearPct}%</span>
       <span class="hdr-batt">${r.batteryPct}%</span>
       <span class="hdr-ers ${ERS_CLASS[r.ersMode] || "ers-none"}">${esc(r.ersMode)}</span>
-      <span class="drs ${r.drs ? "on" : ""}">DRS</span>
+      <span class="ovr ${r.overtake ? "on" : ""}">OVR</span>
     </div>`;
   };
   return `<div class="info-header">${row(header[0], "AHEAD")}${row(header[1], "BEHIND")}</div>`;
